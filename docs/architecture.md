@@ -70,6 +70,8 @@ The database smoke check runs `docker compose up -d --wait --wait-timeout 60` ag
 
 ## Intentionally deferred
 
+The private-pilot design is recorded in [docs/design](design/README.md). Those documents do not change this scaffold, and none of that behavior is implemented.
+
 These are product and platform pieces this scaffold does not include:
 
 - Authentication and sessions
