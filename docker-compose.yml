@@ -1,0 +1,21 @@
+name: devflow
+
+services:
+  postgres:
+    image: postgres:18
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: devflow
+      POSTGRES_PASSWORD: devflow
+      POSTGRES_DB: devflow
+    volumes:
+      - devflow-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devflow -d devflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  devflow-postgres:
