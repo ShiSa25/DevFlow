@@ -4,7 +4,7 @@
   "private": true,
   "description": "DevFlow application scaffold",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22 <23"
   },
   "scripts": {
     "dev": "next dev -H 127.0.0.1",
@@ -14,7 +14,8 @@
     "lint": "next typegen && eslint",
     "test": "tsx --test tests/*.test.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:smoke": "tsx scripts/db-smoke.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",
