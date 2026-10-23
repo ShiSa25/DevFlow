@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,6 +11,17 @@ type CdpResponse = {
   result?: Record<string, unknown>;
 };
 
+const CHROME_CANDIDATES = [
+  process.env.CHROME_PATH,
+  process.env.CHROME_BIN,
+  "/opt/google/chrome/chrome",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/local/share/chromium/chrome-linux/chrome",
+];
+
 /**
  * Drive one headless Chrome page through the DevTools protocol.
  * The session cookie is httpOnly, so it is set through the protocol
@@ -20,34 +32,91 @@ export class ChromePage {
   private socket: WebSocket | undefined;
   private profile = "";
   private nextId = 0;
+  private stderr = "";
   private readonly pending = new Map<number, {
     resolve: (value: CdpResponse) => void;
     reject: (error: Error) => void;
   }>();
 
   async open(origin: string, cookieValue: string): Promise<void> {
+    const binary = resolveChromeBinary();
     const port = await freePort();
     this.profile = await mkdtemp(join(tmpdir(), "devflow-chrome-"));
     this.chrome = spawn(
-      "google-chrome",
+      binary,
       [
         "--headless=new",
         "--disable-gpu",
         "--no-sandbox",
+        "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-breakpad",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--metrics-recording-only",
         "--remote-allow-origins=*",
+        "--remote-debugging-address=127.0.0.1",
         `--remote-debugging-port=${port}`,
         `--user-data-dir=${this.profile}`,
         "about:blank",
       ],
-      { detached: true, stdio: "ignore" },
+      {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS || "disabled:",
+        },
+      },
     );
+    this.chrome.stdout?.on("data", (chunk: Buffer) => {
+      this.noteOutput(chunk.toString());
+    });
+    this.chrome.stderr?.on("data", (chunk: Buffer) => {
+      this.noteOutput(chunk.toString());
+    });
+    let launchFailed = false;
+    const launchError = new Promise<never>((_resolve, reject) => {
+      this.chrome?.once("error", (error) => {
+        launchFailed = true;
+        reject(new Error(`Could not start ${binary}: ${error.message}`));
+      });
+      this.chrome?.once("exit", (code, signal) => {
+        if (launchFailed) {
+          return;
+        }
+        launchFailed = true;
+        reject(new Error(
+          `Chrome exited before the debugging port opened (${exitDescription(code, signal)}). ${this.stderrTail()}`,
+        ));
+      });
+    });
+    launchError.catch(() => undefined);
 
-    const pageSocket = await waitForPageSocket(port);
+    let pageSocket: string;
+    try {
+      pageSocket = await Promise.race([
+        waitForPageSocket(port, () => this.stderrTail()),
+        launchError,
+      ]);
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
+
     this.socket = new WebSocket(pageSocket);
     await new Promise<void>((resolve, reject) => {
       this.socket?.addEventListener("open", () => resolve(), { once: true });
-      this.socket?.addEventListener("error", () => reject(new Error("Chrome socket failed")), { once: true });
+      this.socket?.addEventListener(
+        "error",
+        () => reject(new Error(`Chrome socket failed. ${this.stderrTail()}`)),
+        { once: true },
+      );
     });
     this.socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data)) as CdpResponse;
@@ -103,8 +172,17 @@ export class ChromePage {
       }
     }
     if (this.profile) {
-      await rm(this.profile, { recursive: true, force: true });
+      await rm(this.profile, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  private noteOutput(text: string): void {
+    this.stderr = `${this.stderr}${text}`.slice(-4_000);
+  }
+
+  private stderrTail(): string {
+    const text = this.stderr.replace(/\s+/g, " ").trim();
+    return text ? `Browser output: ${text.slice(-500)}` : "Browser output was empty.";
   }
 
   private async send(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
@@ -119,6 +197,17 @@ export class ChromePage {
     }
     return response.result ?? {};
   }
+}
+
+export function resolveChromeBinary(): string {
+  for (const candidate of CHROME_CANDIDATES) {
+    if (candidate && existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(
+    "Chrome or Chromium was not found. Install Google Chrome or set CHROME_BIN to the browser executable.",
+  );
 }
 
 async function freePort(): Promise<number> {
@@ -138,9 +227,9 @@ async function freePort(): Promise<number> {
   });
 }
 
-async function waitForPageSocket(port: number): Promise<string> {
-  let lastError = "Chrome did not open a page";
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+async function waitForPageSocket(port: number, output: () => string): Promise<string> {
+  let lastError = "Chrome did not open a debugging port";
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`);
       if (response.ok) {
@@ -149,11 +238,25 @@ async function waitForPageSocket(port: number): Promise<string> {
         if (page?.webSocketDebuggerUrl) {
           return page.webSocketDebuggerUrl;
         }
+        lastError = "Chrome is listening, but no page target is available";
+      } else {
+        lastError = `Chrome debugging endpoint returned HTTP ${response.status}`;
       }
     } catch (error) {
-      lastError = error instanceof Error ? error.message : lastError;
+      const cause = error instanceof Error && "cause" in error ? error.cause : undefined;
+      const code = typeof cause === "object" && cause && "code" in cause ? String(cause.code) : "";
+      lastError = code ? `${error instanceof Error ? error.message : "fetch failed"} (${code})` : (
+        error instanceof Error ? error.message : "fetch failed"
+      );
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(lastError);
+  throw new Error(`${lastError}. ${output()}`);
+}
+
+function exitDescription(code: number | null, signal: NodeJS.Signals | null): string {
+  if (signal) {
+    return `signal ${signal}`;
+  }
+  return `code ${code ?? "unknown"}`;
 }
