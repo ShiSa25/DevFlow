@@ -1,17 +1,18 @@
 # Architecture
 
-DevFlow is a Next.js App Router application. This repository is the scaffold: a layout, PostgreSQL wiring, and checks. Product behavior is not implemented yet.
+DevFlow is a Next.js App Router application. The scaffold is still the base: a layout, PostgreSQL wiring, and checks. GitHub sign-in and a minimal protected dashboard are implemented. Projects, tasks, and dashboard metrics are not.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `src/app` | HTTP entry. Routes, layouts, and the static home page. |
-| `src/config` | Process configuration read from the environment. |
+| `src/app` | HTTP entry. Routes, layouts, the static home page, `/sign-in`, `/dashboard`, and the auth catch-all. |
+| `src/auth` | Lazy Better Auth instance, pilot admission, the browser client, and sign-out. |
+| `src/config` | Process configuration read from the environment, including the pilot allowlist. |
 | `src/db` | Server-only data access. `schema.ts` is the Drizzle schema. `client.ts` is the only module that constructs a Postgres pool. |
-| `tests` | Automated checks, run with node:test through `tsx`. They import application modules directly. |
-| `drizzle` | SQL migrations produced by Drizzle Kit. `meta/_journal.json` starts with an empty entry list. |
-| `scripts` | Production and database smoke checks used locally and in CI. |
+| `tests` | Automated checks, run with node:test through `tsx`. They import application modules directly. `tests/auth` is the isolated-database auth run. |
+| `drizzle` | SQL migrations produced by Drizzle Kit. |
+| `scripts` | Production, authentication, and database smoke checks used locally and in CI. |
 | `docs` | Repository documentation. |
 | `.github/workflows/ci.yml` | Pull request and `main` checks. |
 
@@ -20,9 +21,9 @@ Routes stay in `src/app`. Configuration stays in `src/config`. Server code that 
 ## Request flow
 
 1. Next.js receives the request and renders the matching route in `src/app`.
-2. The home page is static scaffold copy. It does not read `DATABASE_URL`, import `src/db`, or check whether Postgres is up. It is not a database readiness check.
+2. The home page is static scaffold copy. It does not read `DATABASE_URL`, import `src/db` or `src/auth`, or check whether Postgres is up. It is not a database readiness check. A session cookie does not turn it into the dashboard.
 3. With Cache Components enabled, `next build` prerenders that page. The prerender does not need Postgres.
-4. A later server route that needs stored data calls `getDb()` and runs a query.
+4. `/sign-in` renders the GitHub button without a session. `/dashboard` calls `requirePilot()` for the current request. That loads the Better Auth instance, which calls `getDb()`, then checks the session and the pilot allowlist. `/api/auth/[...all]` is the Better Auth route handler.
 
 `npm run dev` and `npm run start` listen on `127.0.0.1`. `poweredByHeader` is off, so responses do not include `X-Powered-By`.
 
@@ -66,20 +67,32 @@ npm run db:migrate
 
 The production smoke check starts `npm run start` with `DATABASE_URL` unset and without Postgres. It requires HTTP 200 from `http://127.0.0.1:3000/` and the scaffold page text.
 
+The authentication check starts Compose Postgres and runs `npm run test:auth`. That command creates a `devflow_auth_test_<hex>` database, migrates only that database, and drops it. It refuses any other database name. GitHub HTTP is mocked. The same run requests `/`, `/sign-in`, the auth handler, and `/dashboard` from a production server built with `cacheComponents` still enabled.
+
 The database smoke check runs `docker compose up -d --wait --wait-timeout 60` against this Compose file. It then sets `DATABASE_URL` to the Compose database and only then applies migrations and runs `npm run db:smoke`. An inherited `DATABASE_URL` cannot move those commands to another database. If Postgres does not become healthy within 60 seconds, or either later command fails, the job exits with a smoke-check message and Compose logs. The script always runs `docker compose down --remove-orphans` afterward. That stops the container and does not delete the named volume.
+
+## Authentication
+
+Better Auth 1.7.12 stores sessions in Postgres and uses GitHub as the only provider. `getAuth()` builds that instance on first use. Importing `src/auth`, `next build`, and `/` do not connect to Postgres.
+
+`PILOT_GITHUB_USER_IDS` is parsed when `src/config/pilot.ts` is first loaded. The running process keeps that result. Restart or redeploy after changing it. Empty and malformed lists deny access. `requirePilot()` loads the GitHub account id for the session user and compares that decimal string with the loaded set. Pages redirect. Other callers get `unauthenticated` or `unapproved`.
+
+`/dashboard` reads the session inside a Suspense boundary so `next build` can prerender `/` without a database. With Cache Components, an unauthenticated or unapproved dashboard response carries Next's redirect to `/sign-in` in the HTML (a refresh target and `NEXT_REDIRECT`) rather than only a `Location` header. The approved response streams the signed-in sentence for that request. It is not a shared cached render.
+
+An unauthenticated `GET /dashboard` with `DATABASE_URL` unset still returns HTTP 200 for the shell and does not render protected content. Constructing the auth instance calls `getDb()`, which throws `DATABASE_URL is not set` before `getSession` runs, because the Drizzle schema check in this version is in memory and does not connect by itself. `GET /api/auth/get-session` with `DATABASE_URL` unset returns HTTP 500 for the same reason. Neither request changes `/`.
+
+The GitHub access token is used in memory for the user lookup and is not stored. Account token and token-expiry columns stay null. Email is the synthetic address `{githubUserId}@users.noreply.devflow.invalid`. It is not the login key.
+
+The private-pilot decisions are in [docs/design](design/README.md). Milestone 2 implements the authentication portion of those decisions.
 
 ## Intentionally deferred
 
-The private-pilot design is recorded in [docs/design](design/README.md). Those documents do not change this scaffold, and none of that behavior is implemented.
+These product and platform pieces are not in the app yet:
 
-These are product and platform pieces this scaffold does not include:
-
-- Authentication and sessions
-- Dashboard and other product screens
-- Token or usage tracking
-- Domain tables and queries
+- Project and task screens, tables, and mutations
+- Dashboard metrics
 - Background workers, queues, and email
 - A container for the Next.js app
 - Hosted deployment manifests
 
-Add a table to `src/db/schema.ts`, generate a migration, and call `getDb()` from the server route that needs the data when the first product feature needs storage.
+Add a table to `src/db/schema.ts`, generate a migration, and call `getDb()` from the server route that needs the data when the next product feature needs storage.

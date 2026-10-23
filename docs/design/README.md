@@ -1,6 +1,6 @@
 # Private pilot design
 
-Status: design only. Nothing in this directory is implemented.
+Status: decisions for the private pilot. Milestone 2 implements GitHub sign-in, sessions, the allowlist, the auth tables, `/sign-in`, the auth handler, and the minimal `/dashboard`. Projects, tasks, and dashboard metrics are still unimplemented. These documents remain the decision record.
 
 These documents record the Milestone 1 decisions for the private pilot. They sit on top of the existing Next.js and PostgreSQL scaffold. They do not add dependencies, tables, migrations, routes, or cloud resources.
 
