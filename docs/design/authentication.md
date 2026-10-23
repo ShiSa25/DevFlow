@@ -37,10 +37,10 @@ Verified from registry metadata and the published `better-auth@1.7.12`, `@better
 - `user.validateUserInfo` running before the user insert on the OAuth create path in this version.
 - The Drizzle adapter's `transaction` flag defaulting to false unless the caller sets it.
 
-Not yet verified, because this pull request does not install the library:
+Not run, because this pull request does not install the library:
 
-- `next build` with `cacheComponents: true` after an auth route exists.
-- A live GitHub callback. Milestone 2 has to run those checks. If a later Better Auth release moves the allowlist gate to after the user insert, or starts requiring a real email before `mapProfileToUser` can supply one, that release does not meet this design.
+- The Milestone 2 build and request checks under [Tests](#tests).
+- Any GitHub callback, including a mocked one. If a later Better Auth release moves the allowlist gate to after the user insert, or starts requiring a real email before `mapProfileToUser` can supply one, that release does not meet this design.
 
 `cacheComponents` and `partialPrefetching` stay as they are in `next.config.ts`. Protected pages read the request session, so they stay dynamic. Private query results are rendered for that request. They do not go into a shared cache.
 
@@ -105,7 +105,7 @@ Local callback URL, matching `next dev -H 127.0.0.1` and `next start -H 127.0.0.
 
 ### Post-login redirects
 
-The sign-in call passes a relative `callbackURL` such as `/`. Error redirects use a relative `/sign-in` URL. 1.7.12's origin middleware, mounted on every auth route, checks `callbackURL` on the sign-in POST and allows a safe relative path. The OAuth `state` value is stored in the `verification` table and echoed in a signed cookie; the callback rejects a state that does not match both. State expires after 10 minutes. The callback then redirects only to the callback URL that was stored with that state.
+The sign-in call passes the relative `callbackURL` `/dashboard`. Error redirects use the relative URL `/sign-in`. `/` stays the public scaffold and is not the post-login destination. The route map is in [system design](system.md#routes). 1.7.12's origin middleware, mounted on every auth route, checks `callbackURL` on the sign-in POST and allows a safe relative path. The OAuth `state` value is stored in the `verification` table and echoed in a signed cookie; the callback rejects a state that does not match both. State expires after 10 minutes. The callback then redirects only to the callback URL that was stored with that state.
 
 The authorization request includes a PKCE S256 `code_challenge`. The token request sends the matching `code_verifier`. Callers cannot override `state`, `redirect_uri`, or the PKCE parameters through `additionalParams` in this version.
 
@@ -175,30 +175,66 @@ There is no separate proxy or middleware authorization gate. The [Next.js integr
 
 ## Tests
 
-Documented here and implemented in a later milestone. This pull request adds no tests and no routes.
+The scaffold checks below are what the repository runs today. Every heading marked Planned is required later and is not implemented in this change. This pull request adds no tests, no routes, and no Better Auth install.
 
-Automated auth tests use an isolated database. They set their own `DATABASE_URL` to a dedicated database on the local Postgres, migrate that database, and refuse to run against an inherited developer URL or the Compose app database `devflow`. The existing node:test runner stays. CI does not call GitHub, and it does not receive GitHub client credentials.
+### Checks that exist today
 
-A valid session is a real Better Auth session:
+CI runs `typecheck`, `lint`, node:test, `next build`, the production smoke request to `/`, and the Compose database smoke. Those commands do not install Better Auth, do not request `/dashboard`, and do not mock GitHub. A docs-only change can re-run the commands that do not need Postgres. It cannot honestly report the Milestone 2 checks below as passed.
 
-1. Insert `user`, `account` (`providerId` `github`, `accountId` the decimal string), and `session` rows in the test database. `session.expiresAt` is in the future. `session.token` is the raw token.
+### Planned: seeded sessions for pages and authorization
+
+Protected-page and authorization tests keep using seeded rows that the real library accepts. They use an isolated database. The test sets its own `DATABASE_URL` to a dedicated database on local Postgres, migrates that database, and refuses to run against an inherited developer URL or the Compose app database `devflow`. The runner stays node:test. CI has no GitHub client credentials and does not call GitHub.
+
+A seeded session is valid only when the library accepts it:
+
+1. Insert `user`, `account` (`providerId` `github`, `accountId` the decimal string), and `session` rows. `session.expiresAt` is in the future. `session.token` is the raw token. Token columns on `account` are null.
 2. Sign that token with `makeSignature` from `better-auth/crypto` and the test `BETTER_AUTH_SECRET`, using the 1.7.12 cookie format `${token}.${signature}`.
 3. Send the cookie under the configured name (`better-auth.session_token` when the base URL is `http`).
 4. Treat the fixture as valid only when `auth.api.getSession` returns that user.
 
-The `testUtils()` plugin is not added to the application auth instance. No production route accepts a user id, a header, or a query parameter in place of a GitHub sign-in. Test helpers live under `tests/` and are not imported by `src/app`.
+The `testUtils()` plugin is not added to the application auth instance. No production route accepts a user id, a header, or a query parameter in place of a GitHub sign-in. Test helpers live under `tests/` and are not imported by `src/app`. Credentials in these tests are synthetic.
 
-Three cases stay separate:
+Seeded-session cases, kept separate:
 
 | Case | Fixture | Expected result |
 | --- | --- | --- |
-| Unauthenticated | No cookie, or a cookie `getSession` rejects | `unauthenticated`. Pages redirect to sign-in. |
-| Unapproved | `getSession` succeeds, GitHub account id absent from the allowlist | `unapproved`. Distinct from unauthenticated. No protected data. |
-| Cross-user | Two valid approved sessions | User A's reads and mutations of User B's project or task return the same not-found result as a missing id, and they do not write. |
+| Unauthenticated | No cookie, or a cookie `getSession` rejects | `unauthenticated`. `/dashboard`, `/projects`, and `/projects/[projectId]` redirect to `/sign-in`. |
+| Unapproved | `getSession` succeeds, GitHub account id absent from the allowlist | `unapproved`, distinct from unauthenticated. The same three pages redirect to `/sign-in` with the fixed unapproved message and render no protected content. |
+| Cross-user | Two valid approved sessions | User A's reads and mutations of User B's project or task return the same `not_found` result as a missing id, and they do not write. |
+| Empty allowlist | Valid session, allowlist parsed as empty | `unapproved`. |
+| Malformed allowlist | Valid session, allowlist parsed as malformed | `unapproved`. The well-formed ids in that value do not admit anyone. |
+| Archived project, owner | Approved session and an owned archived project with a task | The project and task are readable. `restoreProject` and `deleteProject` write. `updateProject`, `createTask`, `updateTask`, and `deleteTask` return `archived` and leave both rows unchanged. |
+| Archived project, someone else | Approved session and another user's archived project | Reads and mutations return `not_found`, the same result as a missing id. They do not return `archived`. |
 
-Also cover an empty allowlist and a malformed allowlist. Both deny an otherwise valid session. OAuth is not part of these database tests. The GitHub redirect, state check, and token exchange are provider behavior and are not replayed against `github.com` in CI.
+`deleteProject` in the owner case removes the project and, through `ON DELETE CASCADE`, its tasks. Browser tests later reuse this seeded cookie. They do not log in through live GitHub.
 
-Browser tests in a later milestone reuse this session fixture. They do not log in through live GitHub.
+### Planned: offline OAuth through the real handler
+
+Milestone 2 also runs integration tests against the configured Better Auth handler (`toNextJsHandler` / `auth.handler`) and the application hooks. GitHub's token and user HTTP responses are mocked at the network boundary. `user.validateUserInfo`, `databaseHooks.session.create.before`, `mapProfileToUser`, and the account create/update hooks that null token fields stay on the real auth instance. The test does not replace those hooks with stubs that skip admission or token sanitization.
+
+Each case uses synthetic `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `BETTER_AUTH_SECRET`, a synthetic allowlist, and the isolated database. Nothing in the test calls `github.com`.
+
+| Case | Expected result |
+| --- | --- |
+| (a) Approved first-time sign-in | One `user`, one `account` (`provider_id` `github`, `account_id` the decimal GitHub id), and one `session`. The handler then redirects to `/dashboard`. |
+| (b) Approved returning sign-in | The same user and account rows. A new session. The handler redirects to `/dashboard`. |
+| (c) Private or null GitHub email | Sign-in succeeds. `user.email` is `{githubUserId}@users.noreply.devflow.invalid` and `email_verified` is false. |
+| (d) Unapproved first-time user | The handler creates no `user`, `account`, or `session` row. The browser is sent to `/sign-in` with the fixed not-approved code. |
+| (e) Pilot user removed, then configuration reloaded | After a process restart or a fresh load of the config module with that id removed, a new OAuth sign-in creates no session. A session that was valid before the reload is presented again and protected operations return `unapproved`. The test reloads configuration the same way production does. It does not expect an already-loaded process to notice an env change in place. |
+| (f) Token columns | After (a), (b), and (c), `access_token`, `refresh_token`, `id_token`, `access_token_expires_at`, and `refresh_token_expires_at` are null. |
+
+### Planned: Milestone 2 build and request checks
+
+These run in the milestone that adds Better Auth. `next.config.ts` keeps `cacheComponents: true` and `partialPrefetching: true`. None of them have been run with Better Auth installed.
+
+- `next build` with `DATABASE_URL` unset exits 0. `/` still prerenders. The root layout and the `/` page do not import `getAuth()` or `getDb()`.
+- `next start` with `DATABASE_URL` unset returns HTTP 200 and the scaffold text for `GET /`. That is the existing production smoke, re-run after the auth route exists. A session cookie on that request still returns the public scaffold. `/` does not redirect to `/dashboard`.
+- With the test database migrated: `GET /dashboard`, `GET /projects`, and `GET /projects/{id}` with no cookie redirect to `/sign-in` and do not render protected content.
+- The same three routes with an unapproved seeded session redirect to `/sign-in` with the fixed unapproved message.
+- `GET /dashboard` with an approved seeded session returns the minimal Milestone 2 page. That page does not query dashboard metrics.
+- The auth Route Handler and the protected pages read the request, so their responses are not a shared cached render of another user's data. The build must not open a database connection while prerendering `/`.
+
+In 1.7.12, `getSession` returns before the session query when the session cookie is absent. Constructing `getAuth()` can still touch Postgres if the adapter's schema check runs. Milestone 2 records what an unauthenticated `/dashboard` request does when `DATABASE_URL` is unset. That request must not change the `/` response.
 
 ## Sources
 

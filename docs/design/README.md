@@ -6,8 +6,8 @@ These documents record the Milestone 1 decisions for the private pilot. They sit
 
 | Document | What it decides |
 | --- | --- |
-| [Authentication](authentication.md) | Better Auth 1.7.12, database sessions, GitHub only, allowlist, cookies, and how tests mint a session |
-| [System](system.md) | One Next.js app, module boundaries, screens, and what stays on the scaffold |
+| [Authentication](authentication.md) | Better Auth 1.7.12, database sessions, GitHub only, allowlist, cookies, seeded sessions, and offline OAuth tests |
+| [System](system.md) | One Next.js app, the route map (`/` stays public, sign-in lands on `/dashboard`), screens, and what stays on the scaffold |
 | [Database](database.md) | Auth tables, projects, tasks, constraints, and migrations |
 | [Server operations](server-operations.md) | Server Actions for product work, the one auth Route Handler, and authorization results |
 

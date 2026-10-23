@@ -12,7 +12,7 @@ A page-level redirect is not the authorization check. Next.js documents that an 
 2. Load `account` where `user_id` is the session user and `provider_id` is `github`.
 3. If the loaded allowlist is empty or malformed, or `account_id` is not in the ready set, yield `unapproved`.
 
-Pages call this and redirect. Server Actions call this and return the code. They do not redirect. The current user always comes from the session. The client never sends an owner id that the server trusts.
+The protected pages are `/dashboard`, `/projects`, and `/projects/[projectId]`, as mapped in [system design](system.md#routes). Those pages call `requirePilot()` and redirect. `/` and `/sign-in` do not call it. Server Actions call `requirePilot()` and return the code. They do not redirect. The current user always comes from the session. The client never sends an owner id that the server trusts.
 
 `unauthenticated` and `unapproved` stay different results so tests can tell a missing session from a session that is no longer on the pilot list.
 
@@ -29,7 +29,7 @@ A task id that belongs to a different project, including another project the sam
 
 A malformed UUID in a page URL is the same not-found page. A malformed UUID in an action is an `invalid` validation result. That result does not say whether any row exists.
 
-An archived project the caller owns is visible. Mutations other than restore and permanent delete return `archived` and leave the row unchanged. An archived project the caller does not own is `not_found`, not `archived`.
+An archived project the caller owns stays viewable, including its tasks. While it is archived, the only mutations that write are `restoreProject` and `deleteProject`. `archiveProject` on an already archived owned project does not write. `updateProject`, `createTask`, `updateTask`, and `deleteTask` return `archived` and do not write. A missing project, a project the caller does not own, or a task/project pair that does not match returns `not_found` whether or not that project is archived. `not_found` and `archived` stay different results.
 
 ## Validation
 
@@ -73,10 +73,10 @@ Each function lives next to its domain (`src/projects`, `src/tasks`) and calls `
 | `restoreProject` | Yes | Clears `archived_at` and sets `updated_at`. Restoring an active owned project is a no-op success. |
 | `deleteProject` | Yes | Owned project, active or archived. Input includes `confirm: "delete"` so a stray submit does not delete. The database `ON DELETE CASCADE` removes tasks. The dialog states that. |
 | `listTasks` | No | One project, owned. Filters, literal search, sort, page size 25. Allowed on an archived project. |
-| `createTask` | Yes | Owned active project. Does not change `project.updated_at`. |
-| `updateTask` | Yes | Owned task in the named active project. Does not change `project.updated_at`. |
-| `deleteTask` | Yes | Owned task in the named project. Confirmation is required in the input. Does not change `project.updated_at`. Permanent. |
-| `getDashboard` | No | Counts and the recent list, from this user's rows only. |
+| `createTask` | Yes | Owned active project. An owned archived project returns `archived` and does not insert. Does not change `project.updated_at`. |
+| `updateTask` | Yes | Owned task in the named active project. An owned archived project returns `archived` and does not update. Does not change `project.updated_at`. |
+| `deleteTask` | Yes | Owned task in the named active project. Confirmation is required in the input. An owned archived project returns `archived` and does not delete the task. A missing or inaccessible project, task, or pair returns `not_found`. Does not change `project.updated_at`. |
+| `getDashboard` | No | Counts and the recent list, from this user's rows only. This is the later dashboard milestone. Milestone 2's `/dashboard` page does not call it. |
 
 Dashboard numbers:
 
@@ -99,10 +99,19 @@ An account with no projects gets a create-project prompt. An account whose proje
 | `unauthenticated` | No usable session | Page redirects to `/sign-in`. Action returns the code. |
 | `unapproved` | Session exists, GitHub id is not approved, or the allowlist is empty or malformed | Page redirects to sign-in with fixed copy. Action returns the code. |
 | `not_found` | Missing id, other owner's id, or a task/project pair that does not match | Same not-found presentation in every case. |
-| `archived` | Owner tried to edit an archived project or its tasks | The project stays read-only. No write. |
+| `archived` | Owner tried to edit project fields, or create, update, or delete a task, while that owned project is archived | No write. Restore and permanent project delete remain available. View stays available. |
 | `invalid` | Zod rejected the input | Field errors, announced, data unchanged. |
 | Success | Write committed | The page shows the new data. |
 
 OAuth cancellation and failure messages are listed in [authentication](authentication.md). They are fixed strings for known codes.
 
 Pending mutations disable the control that submitted them. Focus returns to the opener when a native dialog closes. Those checks are part of building the UI, not part of this pull request.
+
+## Planned authorization tests
+
+These are not implemented in this change. They use the seeded sessions in [authentication](authentication.md#tests). Archived cases:
+
+- The owner can read an archived project and its tasks.
+- `restoreProject` writes for that owner. `deleteProject` writes and the task rows go away with the project cascade.
+- `updateProject`, `createTask`, `updateTask`, and `deleteTask` return `archived` and leave the project and task rows unchanged.
+- The same reads and mutations against another user's archived project, or against an id that does not exist, return `not_found` and do not write.
