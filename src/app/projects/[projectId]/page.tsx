@@ -72,7 +72,7 @@ async function ProjectContent({ params }: { params: Promise<{ projectId: string 
       ) : (
         <>
           <ProjectForm
-            key={project.updatedAt}
+            key={project.id}
             mode="edit"
             projectId={project.id}
             initialName={project.name}

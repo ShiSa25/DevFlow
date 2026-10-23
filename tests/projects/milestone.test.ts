@@ -9,8 +9,9 @@ import {
   dropIsolatedDatabase,
   migrateIsolatedDatabase,
 } from "../auth/database";
-import { FIELD_MESSAGES } from "../../src/projects/messages";
+import { CHANGES_SAVED_MESSAGE, FIELD_MESSAGES } from "../../src/projects/messages";
 import { createInputFromFormData } from "../../src/projects/validation";
+import { ChromePage } from "./cdp-browser";
 
 const SECRET = "test-secret-must-be-at-least-32-characters";
 const ORIGIN = "http://127.0.0.1:3000";
@@ -1026,4 +1027,173 @@ describe("milestone 3 projects", { concurrency: 1 }, () => {
     );
     assert.equal(logs.includes("postgres://"), false);
   });
+
+  it("keeps the edit confirmation after the server refreshes the project", async () => {
+    assert.equal(existsSync(".next"), true, "run npm run build before project request checks");
+    await resetProjects();
+    const editedId = projectUuid(40);
+    const otherId = projectUuid(41);
+    const when = new Date("2024-08-01T00:00:00.000Z");
+    await insertProject({
+      id: editedId,
+      ownerId: ADA_ID,
+      name: "Original name",
+      description: "Original notes",
+      createdAt: when,
+      updatedAt: when,
+    });
+    await insertProject({
+      id: otherId,
+      ownerId: ADA_ID,
+      name: "Other project",
+      description: "Other notes",
+      createdAt: when,
+      updatedAt: new Date(when.getTime() + 1000),
+    });
+
+    const chrome = new ChromePage();
+    try {
+      await withServer({}, async () => {
+        const cookieValue = decodeURIComponent(adaCookie.slice("better-auth.session_token=".length));
+        await chrome.open(ORIGIN, cookieValue);
+        await chrome.goto(`${ORIGIN}/projects/${editedId}`);
+        await waitForProject(chrome, "Original name", "Original notes");
+        await chrome.evaluate<boolean>(`new Promise((resolve, reject) => {
+          const started = Date.now();
+          const timer = setInterval(() => {
+            const form = document.querySelector("#edit-project-name")?.form;
+            if (!form) {
+              return;
+            }
+            const names = Object.getOwnPropertyNames(form).concat(
+              Object.getOwnPropertySymbols(form).map((symbol) => String(symbol)),
+            );
+            if (names.some((name) => name.toLowerCase().includes("react"))) {
+              clearInterval(timer);
+              resolve(true);
+              return;
+            }
+            if (Date.now() - started > 8000) {
+              clearInterval(timer);
+              reject(new Error("Edit form did not hydrate"));
+            }
+          }, 50);
+        })`);
+        await chrome.evaluate<boolean>(`(() => {
+          const setValue = (selector, value) => {
+            const element = document.querySelector(selector);
+            if (!element) {
+              throw new Error("Missing " + selector);
+            }
+            const prototype = element instanceof HTMLTextAreaElement
+              ? HTMLTextAreaElement.prototype
+              : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(prototype, "value").set;
+            setter.call(element, value);
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+          };
+          setValue("#edit-project-name", "  Renamed project  ");
+          setValue("#edit-project-description", "  Updated notes  ");
+          document.querySelector("#edit-project-name").form.requestSubmit();
+          return true;
+        })()`);
+
+        const saved = await waitForProject(chrome, "Renamed project", "Updated notes", true);
+        assert.equal(saved.saved, true);
+        assert.equal(saved.name, "Renamed project");
+        assert.equal(saved.notes, "Updated notes");
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        const settled = await projectSnapshot(chrome);
+        assert.equal(settled.heading, "Renamed project");
+        assert.equal(settled.description, "Updated notes");
+        assert.equal(settled.name, "Renamed project");
+        assert.equal(settled.notes, "Updated notes");
+        assert.equal(settled.saved, true);
+        assert.equal(settled.message, CHANGES_SAVED_MESSAGE);
+
+        await chrome.evaluate(`(() => {
+          const link = document.createElement("a");
+          link.href = ${JSON.stringify(`${ORIGIN}/projects/${otherId}`)};
+          document.body.appendChild(link);
+          link.click();
+          return true;
+        })()`);
+        const other = await waitForProject(chrome, "Other project", "Other notes");
+        assert.equal(other.saved, false);
+        assert.equal(other.name, "Other project");
+        assert.equal(other.notes, "Other notes");
+      });
+    } finally {
+      await chrome.close();
+    }
+
+    const savedRow = await readRow(editedId);
+    assert.equal(savedRow?.name, "Renamed project");
+    assert.equal(savedRow?.description, "Updated notes");
+  });
 });
+
+type ProjectSnapshot = {
+  heading: string;
+  description: string;
+  name: string;
+  notes: string;
+  saved: boolean;
+  message: string;
+};
+
+async function projectSnapshot(chrome: ChromePage): Promise<ProjectSnapshot> {
+  return chrome.evaluate<ProjectSnapshot>(`(() => {
+    const message = document.querySelector("#edit-project-form-error");
+    return {
+      heading: document.querySelector("h1")?.textContent ?? "",
+      description: document.querySelector(".project-description")?.textContent ?? "",
+      name: document.querySelector("#edit-project-name")?.value ?? "",
+      notes: document.querySelector("#edit-project-description")?.value ?? "",
+      saved: (message?.textContent ?? "") === ${JSON.stringify(CHANGES_SAVED_MESSAGE)},
+      message: message?.textContent ?? "",
+    };
+  })()`);
+}
+
+async function waitForProject(
+  chrome: ChromePage,
+  heading: string,
+  description: string,
+  saved = false,
+): Promise<ProjectSnapshot> {
+  let last: ProjectSnapshot = {
+    heading: "",
+    description: "",
+    name: "",
+    notes: "",
+    saved: false,
+    message: "",
+  };
+  let lastError = "";
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      last = await projectSnapshot(chrome);
+      lastError = "";
+    } catch (error) {
+      lastError = error instanceof Error ? error.message.split("\n")[0] : "snapshot failed";
+      last = { heading: "", description: "", name: "", notes: "", saved: false, message: "" };
+    }
+    if (
+      last.heading === heading &&
+      last.description === description &&
+      last.name === heading &&
+      last.notes === description &&
+      last.saved === saved
+    ) {
+      return last;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  const pageText = await chrome.evaluate<string>(
+    `location.href + " | " + (document.body?.innerText ?? "").replace(/\\s+/g, " ").slice(0, 180)`,
+  ).catch(() => lastError);
+  throw new Error(
+    `Project page did not show ${heading}. Last heading ${last.heading}, name ${last.name}, saved ${String(last.saved)}. ${pageText}`,
+  );
+}

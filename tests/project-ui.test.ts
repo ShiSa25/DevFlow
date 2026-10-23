@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
-import { DELETE_PERMANENT_MESSAGE, FIELD_MESSAGES } from "../src/projects/messages";
+import { CHANGES_SAVED_MESSAGE, DELETE_PERMANENT_MESSAGE, FIELD_MESSAGES } from "../src/projects/messages";
 import { idleProjectActionState, type ProjectActionState, type ProjectFormAction } from "../src/projects/types";
 
 const SECRET_INPUT = "postgres://user:secret@db.example/devflow";
@@ -21,6 +21,8 @@ type View = {
   click(selector: string): Promise<void>;
   submit(selector: string): Promise<void>;
   requestSubmitTwice(selector: string): Promise<void>;
+  fill(selector: string, value: string): Promise<void>;
+  rerender(node: unknown): Promise<void>;
   text(): string;
   element(selector: string): TestNode;
   query(selector: string): TestNode | null;
@@ -86,6 +88,25 @@ async function render(node: unknown): Promise<View> {
         form.dispatchEvent(event());
       });
     },
+    async fill(selector: string, value: string) {
+      await React.act(async () => {
+        const node = element(selector) as unknown as {
+          tagName: string;
+          value: string;
+          dispatchEvent(event: object): boolean;
+        };
+        const prototype =
+          node.tagName === "TEXTAREA" ? dom.HTMLTextAreaElement.prototype : dom.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+        setter?.call(node, value);
+        node.dispatchEvent(new dom.Event("input", { bubbles: true }));
+      });
+    },
+    async rerender(node: unknown) {
+      await React.act(async () => {
+        root.render(node as Parameters<typeof root.render>[0]);
+      });
+    },
     text() {
       return container.textContent ?? "";
     },
@@ -133,8 +154,8 @@ describe("project forms and delete dialog", () => {
 
     const name = view.element("#create-project-name");
     assert.equal(name.getAttribute("aria-invalid"), null);
-    name.value = SECRET_INPUT;
-    view.element("#create-project-description").value = "Notes";
+    await view.fill("#create-project-name", SECRET_INPUT);
+    await view.fill("#create-project-description", "Notes");
 
     const pending = view.requestSubmitTwice("form");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -229,5 +250,114 @@ describe("project forms and delete dialog", () => {
     assert.equal(view.active(), opener);
     assert.equal(calls, 1);
     assert.equal(idleProjectActionState.code, "idle");
+  });
+
+  it("keeps a rejected create entry and submits that description on retry", async () => {
+    const React = await import("react");
+    const { ProjectForm } = await import("../src/app/projects/project-form");
+    const submissions: Array<{ name: string; description: string }> = [];
+    const submitAction: ProjectFormAction = async (_previous, formData) => {
+      const enteredName = String(formData.get("name") ?? "");
+      const enteredDescription = String(formData.get("description") ?? "");
+      submissions.push({ name: enteredName, description: enteredDescription });
+      if (enteredName.trim().length === 0) {
+        return {
+          code: "invalid",
+          fieldErrors: { name: FIELD_MESSAGES.name },
+          message: null,
+        };
+      }
+      return { code: "success", fieldErrors: {}, message: null };
+    };
+    const view = await render(React.createElement(ProjectForm, { mode: "create", submitAction }));
+    views.push(view);
+
+    await view.fill("#create-project-name", "   ");
+    await view.fill("#create-project-description", "Keep this description");
+    await view.submit("form");
+
+    assert.equal(view.element("#create-project-name").value, "   ");
+    assert.equal(view.element("#create-project-description").value, "Keep this description");
+    assert.equal(view.element("#create-project-name").getAttribute("aria-invalid"), "true");
+    assert.equal(view.element("#create-project-name").getAttribute("aria-describedby"), "create-project-name-error");
+    assert.equal(view.element("#create-project-name-error").getAttribute("role"), "alert");
+    assert.equal(view.element("#create-project-name-error").textContent, FIELD_MESSAGES.name);
+    assert.equal(view.element("button[type='submit']").hasAttribute("disabled"), false);
+
+    await view.fill("#create-project-name", "Launch");
+    await view.submit("form");
+
+    assert.deepEqual(submissions, [
+      { name: "   ", description: "Keep this description" },
+      { name: "Launch", description: "Keep this description" },
+    ]);
+  });
+
+  it("keeps a rejected edit, retries it, and retains the saved confirmation", async () => {
+    const React = await import("react");
+    const { ProjectForm } = await import("../src/app/projects/project-form");
+    const projectId = "00000000-0000-4000-8000-00000000000b";
+    const otherProjectId = "00000000-0000-4000-8000-00000000000c";
+    const submissions: Array<{ name: string; description: string; id: string }> = [];
+    const submitAction: ProjectFormAction = async (_previous, formData) => {
+      const enteredName = String(formData.get("name") ?? "");
+      const enteredDescription = String(formData.get("description") ?? "");
+      submissions.push({
+        name: enteredName,
+        description: enteredDescription,
+        id: String(formData.get("id") ?? ""),
+      });
+      if (enteredName.trim().length === 0) {
+        return {
+          code: "invalid",
+          fieldErrors: { name: FIELD_MESSAGES.name },
+          message: null,
+        };
+      }
+      return { code: "success", fieldErrors: {}, message: CHANGES_SAVED_MESSAGE };
+    };
+    const form = (id: string, initialName: string, initialDescription: string) =>
+      React.createElement(ProjectForm, {
+        key: id,
+        mode: "edit",
+        projectId: id,
+        initialName,
+        initialDescription,
+        submitAction,
+      });
+    const view = await render(form(projectId, "Saved name", "Saved description"));
+    views.push(view);
+
+    await view.fill("#edit-project-name", "   ");
+    await view.fill("#edit-project-description", "Intended description");
+    await view.submit("form");
+
+    assert.equal(view.element("#edit-project-name").value, "   ");
+    assert.equal(view.element("#edit-project-description").value, "Intended description");
+    assert.notEqual(view.element("#edit-project-name").value, "Saved name");
+    assert.notEqual(view.element("#edit-project-description").value, "Saved description");
+    assert.equal(view.element("#edit-project-name-error").textContent, FIELD_MESSAGES.name);
+
+    await view.fill("#edit-project-name", "  Renamed project  ");
+    await view.submit("form");
+
+    assert.deepEqual(submissions, [
+      { name: "   ", description: "Intended description", id: projectId },
+      { name: "  Renamed project  ", description: "Intended description", id: projectId },
+    ]);
+    assert.equal(view.element("#edit-project-form-error").textContent, CHANGES_SAVED_MESSAGE);
+
+    await view.rerender(form(projectId, "Renamed project", "Intended description"));
+
+    assert.equal(view.element("#edit-project-form-error").textContent, CHANGES_SAVED_MESSAGE);
+    assert.equal(view.element("#edit-project-name").value, "Renamed project");
+    assert.equal(view.element("#edit-project-description").value, "Intended description");
+
+    await view.rerender(form(otherProjectId, "Other project", "Other notes"));
+
+    assert.equal(view.query("#edit-project-form-error"), null);
+    assert.equal(view.text().includes(CHANGES_SAVED_MESSAGE), false);
+    assert.equal(view.element("#edit-project-name").value, "Other project");
+    assert.equal(view.element("#edit-project-description").value, "Other notes");
   });
 });

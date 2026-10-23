@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { idleProjectActionState, type ProjectFormAction } from "../../projects/types";
 import { useSingleSubmit } from "./use-single-submit";
 
@@ -18,7 +18,59 @@ export function ProjectForm({
   submitAction: ProjectFormAction;
 }) {
   const [state, formAction, pending] = useActionState(submitAction, idleProjectActionState);
-  const formRef = useSingleSubmit(pending);
+  const submitRef = useSingleSubmit(pending);
+  const submitRefHolder = useRef(submitRef);
+  const [name, setName] = useState(initialName);
+  const [description, setDescription] = useState(initialDescription);
+  const entered = useRef({ name: initialName, description: initialDescription, projectId });
+  const savedValues = useRef({ name: initialName, description: initialDescription });
+
+  useEffect(() => {
+    entered.current = { name, description, projectId };
+  }, [name, description, projectId]);
+
+  useEffect(() => {
+    if (
+      savedValues.current.name === initialName &&
+      savedValues.current.description === initialDescription
+    ) {
+      return;
+    }
+    savedValues.current = { name: initialName, description: initialDescription };
+    setName(initialName);
+    setDescription(initialDescription);
+  }, [initialName, initialDescription]);
+
+  const [formNode, setFormNode] = useState<HTMLFormElement | null>(null);
+  const formRef = useCallback((node: HTMLFormElement | null) => {
+    submitRefHolder.current(node);
+    setFormNode((current) => (current === node ? current : node));
+  }, []);
+
+  useEffect(() => {
+    if (!formNode) {
+      return;
+    }
+    const restoreEnteredValues = (event: Event) => {
+      event.preventDefault();
+      const nameInput = formNode.querySelector("input[name='name']");
+      const descriptionInput = formNode.querySelector("textarea[name='description']");
+      const idInput = formNode.querySelector("input[name='id']");
+      if (nameInput instanceof HTMLInputElement) {
+        nameInput.value = entered.current.name;
+      }
+      if (descriptionInput instanceof HTMLTextAreaElement) {
+        descriptionInput.value = entered.current.description;
+      }
+      const id = entered.current.projectId;
+      if (idInput instanceof HTMLInputElement && id) {
+        idInput.value = id;
+      }
+    };
+    formNode.addEventListener("reset", restoreEnteredValues);
+    return () => formNode.removeEventListener("reset", restoreEnteredValues);
+  }, [formNode]);
+
   const nameId = `${mode}-project-name`;
   const descriptionId = `${mode}-project-description`;
   const nameErrorId = `${nameId}-error`;
@@ -43,7 +95,8 @@ export function ProjectForm({
         required
         minLength={1}
         maxLength={100}
-        defaultValue={initialName}
+        value={name}
+        onChange={(event) => setName(event.target.value)}
         autoComplete="off"
         aria-invalid={state.fieldErrors.name ? true : undefined}
         aria-describedby={state.fieldErrors.name ? nameErrorId : undefined}
@@ -59,7 +112,8 @@ export function ProjectForm({
         name="description"
         rows={5}
         maxLength={5000}
-        defaultValue={initialDescription}
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
         aria-invalid={state.fieldErrors.description ? true : undefined}
         aria-describedby={state.fieldErrors.description ? descriptionErrorId : undefined}
       />
