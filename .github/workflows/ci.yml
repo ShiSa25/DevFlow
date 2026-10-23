@@ -23,5 +23,7 @@ jobs:
       - run: npm run build
       - name: Production startup smoke
         run: bash scripts/production-smoke.sh
+      - name: Authentication checks
+        run: bash scripts/auth-checks.sh
       - name: Database smoke
         run: bash scripts/database-smoke.sh

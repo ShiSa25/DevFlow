@@ -13,11 +13,13 @@
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "next typegen && eslint",
     "test": "tsx --test tests/*.test.ts",
+    "test:auth": "tsx --test tests/auth/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:smoke": "tsx scripts/db-smoke.ts"
   },
   "dependencies": {
+    "better-auth": "1.7.12",
     "drizzle-orm": "^0.45.4",
     "next": "16.4.2",
     "pg": "^8.23.1",
@@ -32,6 +34,7 @@
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
+    "happy-dom": "^21.0.4",
     "tsx": "^4.20.6",
     "typescript": "^5"
   }
