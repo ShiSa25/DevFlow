@@ -71,7 +71,7 @@ Each function lives next to its domain (`src/projects`, `src/tasks`) and calls `
 | `updateProject` | Yes | Owned and active. Name and description only. Sets `updated_at`. Archived owned projects return `archived`. |
 | `archiveProject` | Yes | Sets `archived_at` and `updated_at` on an owned active project. Archiving an already archived owned project is a no-op success. |
 | `restoreProject` | Yes | Clears `archived_at` and sets `updated_at`. Restoring an active owned project is a no-op success. |
-| `deleteProject` | Yes | Owned project, active or archived. Input includes `confirm: "delete"` so a stray submit does not delete. The database `ON DELETE CASCADE` removes tasks. The dialog states that. |
+| `deleteProject` | Yes | Owned project, active or archived. Input includes `confirm: "delete"` so a stray submit does not delete. Milestone 3 has no task table, so this delete does not cascade to tasks. The dialog states that deletion is permanent. When the task table exists, `ON DELETE CASCADE` removes that project's tasks and the dialog says so. |
 | `listTasks` | No | One project, owned. Filters, literal search, sort, page size 25. Allowed on an archived project. |
 | `createTask` | Yes | Owned active project. An owned archived project returns `archived` and does not insert. Does not change `project.updated_at`. |
 | `updateTask` | Yes | Owned task in the named active project. An owned archived project returns `archived` and does not update. Does not change `project.updated_at`. |
@@ -109,7 +109,7 @@ Pending mutations disable the control that submitted them. Focus returns to the 
 
 ## Planned authorization tests
 
-These are not implemented in this change. They use the seeded sessions in [authentication](authentication.md#planned-seeded-sessions). Milestone 2 does not run them. Its admission checks stop at `/dashboard`.
+Milestone 3 runs the project cases below with the seeded sessions in [authentication](authentication.md#planned-seeded-sessions). Milestone 2's admission checks stop at `/dashboard`. Task cases remain for Milestone 4.
 
 ### Milestone 3 project routes and archive policy
 
@@ -117,7 +117,7 @@ Milestone 3 introduces `/projects` and `/projects/[projectId]`.
 
 - No cookie, and an unapproved seeded session, redirect both routes to `/sign-in`. The unapproved result is distinct and renders no protected content. An approved session can open `/projects`.
 - `/projects/[projectId]` for another user's project, or for an id that does not exist, returns `not_found`.
-- The owner can read an archived project. `restoreProject` writes. `deleteProject` writes, and `ON DELETE CASCADE` removes that project's tasks. `updateProject` returns `archived` and does not write. `archiveProject` on an already archived owned project does not write.
+- The owner can read an archived project. `restoreProject` writes. `deleteProject` writes and removes the owned project row. `updateProject` returns `archived` and does not write. `archiveProject` on an already archived owned project does not write. Milestone 3 has no task table, so this delete does not cascade to tasks.
 - Those project reads and project mutations against another user's archived project, or a missing id, return `not_found` and do not write.
 
 ### Milestone 4 task authorization

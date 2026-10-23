@@ -1,16 +1,18 @@
 /**
- * Auth tables for Better Auth 1.7.12.
+ * Auth tables for Better Auth 1.7.12, plus the owner-scoped project table.
  * Importing this file does not open a database connection.
- * Project and task tables are not part of this milestone.
+ * The task table is not part of this milestone.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -78,9 +80,33 @@ export const verification = pgTable(
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
+export const project = pgTable(
+  "project",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("project_owner_list_idx").on(table.ownerId, table.updatedAt.desc(), table.id.desc()),
+    check("project_name_length", sql`char_length(${table.name}) between 1 and 100`),
+    check(
+      "project_description_length",
+      sql`${table.description} is null or char_length(${table.description}) <= 5000`,
+    ),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
+  projects: many(project),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -93,6 +119,13 @@ export const sessionRelations = relations(session, ({ one }) => ({
 export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, {
     fields: [account.userId],
+    references: [user.id],
+  }),
+}));
+
+export const projectRelations = relations(project, ({ one }) => ({
+  owner: one(user, {
+    fields: [project.ownerId],
     references: [user.id],
   }),
 }));

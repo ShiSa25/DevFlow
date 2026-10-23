@@ -1,18 +1,19 @@
 # Architecture
 
-DevFlow is a Next.js App Router application. The scaffold is still the base: a layout, PostgreSQL wiring, and checks. GitHub sign-in and a minimal protected dashboard are implemented. Projects, tasks, and dashboard metrics are not.
+DevFlow is a Next.js App Router application. The scaffold is still the base: a layout, PostgreSQL wiring, and checks. GitHub sign-in, a minimal protected dashboard, and owner-scoped projects are implemented. Tasks and dashboard metrics are not.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `src/app` | HTTP entry. Routes, layouts, the static home page, `/sign-in`, `/dashboard`, and the auth catch-all. |
+| `src/app` | HTTP entry. Routes, layouts, the static home page, `/sign-in`, `/dashboard`, `/projects`, `/projects/[projectId]`, and the auth catch-all. |
+| `src/projects` | Project validation and owner-scoped operations. Server Actions call `requirePilot()` again. |
 | `src/auth` | Lazy Better Auth instance, pilot admission, the browser client, and sign-out. |
 | `src/config` | Process configuration read from the environment, including the pilot allowlist. |
 | `src/db` | Server-only data access. `schema.ts` is the Drizzle schema. `client.ts` is the only module that constructs a Postgres pool. |
-| `tests` | Automated checks, run with node:test through `tsx`. They import application modules directly. `tests/auth` is the isolated-database auth run. |
+| `tests` | Automated checks, run with node:test through `tsx`. They import application modules directly. `tests/auth` and `tests/projects` are the isolated-database runs. |
 | `drizzle` | SQL migrations produced by Drizzle Kit. |
-| `scripts` | Production, authentication, and database smoke checks used locally and in CI. |
+| `scripts` | Production, authentication, project, and database smoke checks used locally and in CI. |
 | `docs` | Repository documentation. |
 | `.github/workflows/ci.yml` | Pull request and `main` checks. |
 
@@ -23,7 +24,7 @@ Routes stay in `src/app`. Configuration stays in `src/config`. Server code that 
 1. Next.js receives the request and renders the matching route in `src/app`.
 2. The home page is static scaffold copy. It does not read `DATABASE_URL`, import `src/db` or `src/auth`, or check whether Postgres is up. It is not a database readiness check. A session cookie does not turn it into the dashboard.
 3. With Cache Components enabled, `next build` prerenders that page. The prerender does not need Postgres.
-4. `/sign-in` renders the GitHub button without a session. `/dashboard` calls `requirePilot()` for the current request. That loads the Better Auth instance, which calls `getDb()`, then checks the session and the pilot allowlist. `/api/auth/[...all]` is the Better Auth route handler.
+4. `/sign-in` renders the GitHub button without a session. `/dashboard`, `/projects`, and `/projects/[projectId]` each call `requirePilot()` for the current request before rendering protected content. That loads the Better Auth instance, which calls `getDb()`, then checks the session and the pilot allowlist. Project reads and mutations call `requirePilot()` again and scope every query by the session user's id. `/api/auth/[...all]` is the Better Auth route handler.
 
 `npm run dev` and `npm run start` listen on `127.0.0.1`. `poweredByHeader` is off, so responses do not include `X-Powered-By`.
 
@@ -69,6 +70,8 @@ The production smoke check starts `npm run start` with `DATABASE_URL` unset and 
 
 The authentication check starts Compose Postgres and runs `npm run test:auth`. That command creates a `devflow_auth_test_<hex>` database, migrates only that database, and drops it. It refuses any other database name. GitHub HTTP is mocked. The same run requests `/`, `/sign-in`, the auth handler, and `/dashboard` from a production server built with `cacheComponents` still enabled.
 
+The project check starts Compose Postgres and runs `npm run test:projects` with any inherited `DATABASE_URL` removed. That command creates a `devflow_project_test_<hex>` database, migrates only that database, and drops it. It covers project operations and the `/projects` routes. It does not call GitHub.
+
 The database smoke check runs `docker compose up -d --wait --wait-timeout 60` against this Compose file. It then sets `DATABASE_URL` to the Compose database and only then applies migrations and runs `npm run db:smoke`. An inherited `DATABASE_URL` cannot move those commands to another database. If Postgres does not become healthy within 60 seconds, or either later command fails, the job exits with a smoke-check message and Compose logs. The script always runs `docker compose down --remove-orphans` afterward. That stops the container and does not delete the named volume.
 
 ## Authentication
@@ -103,7 +106,7 @@ The private-pilot decisions are in [docs/design](design/README.md). Milestone 2 
 
 These product and platform pieces are not in the app yet:
 
-- Project and task screens, tables, and mutations
+- Task screens, the task table, and task mutations
 - Dashboard metrics
 - Background workers, queues, and email
 - A container for the Next.js app
