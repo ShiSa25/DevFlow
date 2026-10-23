@@ -12,7 +12,7 @@ A page-level redirect is not the authorization check. Next.js documents that an 
 2. Load `account` where `user_id` is the session user and `provider_id` is `github`.
 3. If the loaded allowlist is empty or malformed, or `account_id` is not in the ready set, yield `unapproved`.
 
-The protected pages are `/dashboard`, `/projects`, and `/projects/[projectId]`, as mapped in [system design](system.md#routes). Those pages call `requirePilot()` and redirect. `/` and `/sign-in` do not call it. Server Actions call `requirePilot()` and return the code. They do not redirect. The current user always comes from the session. The client never sends an owner id that the server trusts.
+The protected pages are `/dashboard`, `/projects`, and `/projects/[projectId]`, as mapped in [system design](system.md#routes). Those pages call `requirePilot()` and redirect. `/` and `/sign-in` do not call it. Milestone 2 tests admission on `/dashboard`. Milestone 3 tests it on the project routes, which do not exist before then. Server Actions call `requirePilot()` and return the code. They do not redirect. The current user always comes from the session. The client never sends an owner id that the server trusts.
 
 `unauthenticated` and `unapproved` stay different results so tests can tell a missing session from a session that is no longer on the pilot list.
 
@@ -76,7 +76,7 @@ Each function lives next to its domain (`src/projects`, `src/tasks`) and calls `
 | `createTask` | Yes | Owned active project. An owned archived project returns `archived` and does not insert. Does not change `project.updated_at`. |
 | `updateTask` | Yes | Owned task in the named active project. An owned archived project returns `archived` and does not update. Does not change `project.updated_at`. |
 | `deleteTask` | Yes | Owned task in the named active project. Confirmation is required in the input. An owned archived project returns `archived` and does not delete the task. A missing or inaccessible project, task, or pair returns `not_found`. Does not change `project.updated_at`. |
-| `getDashboard` | No | Counts and the recent list, from this user's rows only. This is the later dashboard milestone. Milestone 2's `/dashboard` page does not call it. |
+| `getDashboard` | No | Counts and the recent list, from this user's rows only. Milestone 5. Milestone 2's `/dashboard` page does not call it. |
 
 Dashboard numbers:
 
@@ -109,9 +109,21 @@ Pending mutations disable the control that submitted them. Focus returns to the 
 
 ## Planned authorization tests
 
-These are not implemented in this change. They use the seeded sessions in [authentication](authentication.md#tests). Archived cases:
+These are not implemented in this change. They use the seeded sessions in [authentication](authentication.md#planned-seeded-sessions). Milestone 2 does not run them. Its admission checks stop at `/dashboard`.
 
-- The owner can read an archived project and its tasks.
-- `restoreProject` writes for that owner. `deleteProject` writes and the task rows go away with the project cascade.
-- `updateProject`, `createTask`, `updateTask`, and `deleteTask` return `archived` and leave the project and task rows unchanged.
-- The same reads and mutations against another user's archived project, or against an id that does not exist, return `not_found` and do not write.
+### Milestone 3 project routes and archive policy
+
+Milestone 3 introduces `/projects` and `/projects/[projectId]`.
+
+- No cookie, and an unapproved seeded session, redirect both routes to `/sign-in`. The unapproved result is distinct and renders no protected content. An approved session can open `/projects`.
+- `/projects/[projectId]` for another user's project, or for an id that does not exist, returns `not_found`.
+- The owner can read an archived project. `restoreProject` writes. `deleteProject` writes, and `ON DELETE CASCADE` removes that project's tasks. `updateProject` returns `archived` and does not write. `archiveProject` on an already archived owned project does not write.
+- Those project reads and project mutations against another user's archived project, or a missing id, return `not_found` and do not write.
+
+### Milestone 4 task authorization
+
+Milestone 4 introduces task operations. The project page already exists.
+
+- The owner can read tasks on an archived project.
+- `createTask`, `updateTask`, and `deleteTask` on an owned archived project return `archived` and leave the project and task rows unchanged.
+- A task read or task mutation for another user's project, a missing id, or a mismatched task/project pair returns `not_found` and does not write. An archived project the caller does not own returns `not_found`, not `archived`.

@@ -41,14 +41,14 @@ Successful sign-in lands on `/dashboard`. `/` stays public.
 | --- | --- | --- |
 | `/` | Public. No session check. | Scaffold copy. Does not call `getAuth()` or `getDb()`. Database-independent, including when a session cookie is present. Not the post-login destination. |
 | `/sign-in` | Public. No session required to render. | "Continue with GitHub". The sign-in call uses relative `callbackURL` `/dashboard`. Errors use fixed copy and a relative `/sign-in` URL. |
-| `/dashboard` | `requirePilot()` before any protected render. | Milestone 2: a minimal page that shows the admitted user is signed in, with no project or task metrics. The dashboard figures below are a later milestone. |
-| `/projects` | `requirePilot()` before the list query. | One project list. The active/archived filter is in the URL. Default is active. |
-| `/projects/[projectId]` | `requirePilot()`, then an owner-scoped project query. | That project and its tasks, or the shared not-found page. |
+| `/dashboard` | `requirePilot()` before any protected render. | Milestone 2: a minimal page that shows the admitted user is signed in, with no project or task metrics. Milestone 5 adds the dashboard figures below. |
+| `/projects` | `requirePilot()` before the list query. | Milestone 3 introduces this route. One project list. The active/archived filter is in the URL. Default is active. |
+| `/projects/[projectId]` | `requirePilot()`, then an owner-scoped project query. | Milestone 3 introduces this route. That project, or the shared not-found page. Task operations on it are Milestone 4. |
 | `/api/auth/[...all]` | Better Auth's handler. | OAuth callback and session HTTP. Not a product API. |
 
 `/dashboard`, `/projects`, and `/projects/[projectId]` are the protected pages. Each calls `requirePilot()` in the page or in a layout that wraps only those routes. Unauthenticated visitors redirect to `/sign-in`. Unapproved visitors redirect to `/sign-in` with the fixed unapproved message. The root layout does not perform this check, so `/` and `/sign-in` stay free of it. Every Server Action those pages call runs `requirePilot()` again.
 
-Milestone 2 adds `/sign-in`, the auth handler, the auth tables, and the minimal `/dashboard` so sign-in can be verified. It does not implement dashboard metrics. Those metrics, the project list, and the project page arrive in the later product milestones.
+Milestone 2 adds `/sign-in`, the auth handler, the auth tables, and the minimal `/dashboard`, and it checks admission only on `/dashboard`. It does not implement dashboard metrics, `/projects`, or `/projects/[projectId]`. Milestone 3 adds those project routes and their admission checks. Milestone 4 adds tasks on the project page. Milestone 5 adds the dashboard metrics.
 
 ## Screens
 
@@ -57,9 +57,9 @@ The pilot UI is server-rendered, works on a narrow viewport and a desktop viewpo
 | Screen | Behavior |
 | --- | --- |
 | Sign-in, `/sign-in` | One control, "Continue with GitHub". Success goes to `/dashboard`. Known OAuth failures use fixed copy: cancellation, not approved, and a generic failure. Query text from GitHub is not inserted as HTML. |
-| Dashboard, `/dashboard` | Milestone 2 shows only that an admitted user reached a protected page. The later dashboard milestone adds active projects, open tasks, all-time completed tasks in active projects, overdue tasks, and up to five recent active projects. The recent heading is **Recently edited projects.** Empty accounts get a create-project call to action. Accounts with only archived projects also get a link to the archived filter. A short note states the `APP_TIME_ZONE` used for due dates. |
-| Project list, `/projects` | One list. A control switches `active` and `archived`. The default is active. The choice is in the URL. |
-| Project detail, `/projects/[projectId]` | Tasks for that project. Filter, search, sort, and page live in the URL. An archived project and its tasks stay readable. Restore and permanent delete remain available. Creating, updating, or deleting a task, and editing the project fields, are refused while it is archived. |
+| Dashboard, `/dashboard` | Milestone 2 shows only that an admitted user reached a protected page. Milestone 5 adds active projects, open tasks, all-time completed tasks in active projects, overdue tasks, and up to five recent active projects. The recent heading is **Recently edited projects.** Empty accounts get a create-project call to action. Accounts with only archived projects also get a link to the archived filter. A short note states the `APP_TIME_ZONE` used for due dates. |
+| Project list, `/projects` | Milestone 3. One list. A control switches `active` and `archived`. The default is active. The choice is in the URL. |
+| Project detail, `/projects/[projectId]` | Milestone 3 opens the project. Milestone 4 adds its tasks. Filter, search, sort, and page live in the URL. An archived project and its tasks stay readable. Restore and permanent delete remain available. Creating, updating, or deleting a task, and editing the project fields, are refused while it is archived. |
 | Forms | Create and edit project, create and edit task. A separate task page is unnecessary. |
 
 Destructive confirmation uses the native `<dialog>` element opened with `showModal()`. The project-delete dialog says that the project's tasks will also be deleted. When that UI is built, the dialog needs an accessible name, it must open and close from the keyboard, and focus must return to the control that opened it. Validation errors are tied to their fields and announced. Buttons show a visible focus style. A pending mutation disables the submitting control so the action is not sent twice.
@@ -76,8 +76,8 @@ The allowlist and the auth secret are described in [authentication](authenticati
 
 ## Later milestones
 
-Milestone 2 implements GitHub sign-in, sessions, the allowlist, the auth tables, `/sign-in`, and a minimal protected `/dashboard`. That page verifies admission. It does not compute dashboard metrics. The milestone runs the build, request, seeded-session, and offline OAuth checks in [authentication](authentication.md#tests).
+Milestone 2 implements GitHub sign-in, sessions, the allowlist, the auth tables, `/sign-in`, the auth handler, and a minimal protected `/dashboard`. Its checks are the build, request, `/dashboard` session, and offline OAuth checks in [authentication](authentication.md#tests). It does not request `/projects` or `/projects/[projectId]`, and it does not compute dashboard metrics.
 
-Later milestones add projects, tasks, and the dashboard metrics, with tests in the same change as each feature. The archived-project cases in [server operations](server-operations.md#planned-authorization-tests) land with the project and task work. CI gains those tests when the feature arrives. This design does not change `.github/workflows/ci.yml`.
+Milestone 3 adds the project routes and project operations, including their admission checks and the project archive policy in [server operations](server-operations.md#milestone-3-project-routes-and-archive-policy). Milestone 4 adds task operations, including archived-project task rules, in [server operations](server-operations.md#milestone-4-task-authorization). Milestone 5 adds `getDashboard`. Each feature's tests arrive in that feature's change. This design does not change `.github/workflows/ci.yml`.
 
 Deployment, including any hosting bind address other than `127.0.0.1`, waits for a separate approval. This design does not add a container manifest or Terraform.

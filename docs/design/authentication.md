@@ -181,7 +181,7 @@ The scaffold checks below are what the repository runs today. Every heading mark
 
 CI runs `typecheck`, `lint`, node:test, `next build`, the production smoke request to `/`, and the Compose database smoke. Those commands do not install Better Auth, do not request `/dashboard`, and do not mock GitHub. A docs-only change can re-run the commands that do not need Postgres. It cannot honestly report the Milestone 2 checks below as passed.
 
-### Planned: seeded sessions for pages and authorization
+### Planned: seeded sessions
 
 Protected-page and authorization tests keep using seeded rows that the real library accepts. They use an isolated database. The test sets its own `DATABASE_URL` to a dedicated database on local Postgres, migrates that database, and refuses to run against an inherited developer URL or the Compose app database `devflow`. The runner stays node:test. CI has no GitHub client credentials and does not call GitHub.
 
@@ -194,19 +194,17 @@ A seeded session is valid only when the library accepts it:
 
 The `testUtils()` plugin is not added to the application auth instance. No production route accepts a user id, a header, or a query parameter in place of a GitHub sign-in. Test helpers live under `tests/` and are not imported by `src/app`. Credentials in these tests are synthetic.
 
-Seeded-session cases, kept separate:
+Milestone 2 uses that fixture for `/dashboard` only. `/projects` and `/projects/[projectId]` are not in this milestone.
 
-| Case | Fixture | Expected result |
+| Case | Fixture | Expected result on `/dashboard` |
 | --- | --- | --- |
-| Unauthenticated | No cookie, or a cookie `getSession` rejects | `unauthenticated`. `/dashboard`, `/projects`, and `/projects/[projectId]` redirect to `/sign-in`. |
-| Unapproved | `getSession` succeeds, GitHub account id absent from the allowlist | `unapproved`, distinct from unauthenticated. The same three pages redirect to `/sign-in` with the fixed unapproved message and render no protected content. |
-| Cross-user | Two valid approved sessions | User A's reads and mutations of User B's project or task return the same `not_found` result as a missing id, and they do not write. |
-| Empty allowlist | Valid session, allowlist parsed as empty | `unapproved`. |
-| Malformed allowlist | Valid session, allowlist parsed as malformed | `unapproved`. The well-formed ids in that value do not admit anyone. |
-| Archived project, owner | Approved session and an owned archived project with a task | The project and task are readable. `restoreProject` and `deleteProject` write. `updateProject`, `createTask`, `updateTask`, and `deleteTask` return `archived` and leave both rows unchanged. |
-| Archived project, someone else | Approved session and another user's archived project | Reads and mutations return `not_found`, the same result as a missing id. They do not return `archived`. |
+| Unauthenticated | No cookie, or a cookie `getSession` rejects | `unauthenticated`. Redirect to `/sign-in`. No protected content. |
+| Unapproved | `getSession` succeeds, GitHub account id absent from the allowlist | `unapproved`, distinct from unauthenticated. Redirect to `/sign-in` with the fixed unapproved message. No protected content. |
+| Approved | `getSession` succeeds and the GitHub account id is approved | The minimal Milestone 2 page. It does not query dashboard metrics. |
+| Empty allowlist | Otherwise valid session, allowlist parsed as empty | `unapproved`. |
+| Malformed allowlist | Otherwise valid session, allowlist parsed as malformed | `unapproved`. The well-formed ids in that value do not admit anyone. |
 
-`deleteProject` in the owner case removes the project and, through `ON DELETE CASCADE`, its tasks. Browser tests later reuse this seeded cookie. They do not log in through live GitHub.
+Later milestones reuse the same fixture. Milestone 3 owns admission for `/projects` and `/projects/[projectId]`, project `not_found` behavior, and the project archive policy. Milestone 4 owns task authorization, including task mutations on an archived project. Those cases are in [server operations](server-operations.md#planned-authorization-tests). Browser tests reuse this seeded cookie. They do not log in through live GitHub.
 
 ### Planned: offline OAuth through the real handler
 
@@ -225,14 +223,14 @@ Each case uses synthetic `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `BETTER
 
 ### Planned: Milestone 2 build and request checks
 
-These run in the milestone that adds Better Auth. `next.config.ts` keeps `cacheComponents: true` and `partialPrefetching: true`. None of them have been run with Better Auth installed.
+These run in Milestone 2, which adds Better Auth, `/sign-in`, `/api/auth/[...all]`, and the minimal `/dashboard`. `next.config.ts` keeps `cacheComponents: true` and `partialPrefetching: true`. None of them have been run with Better Auth installed. Milestone 2 does not request `/projects` or `/projects/[projectId]`. Those admission checks are [Milestone 3](server-operations.md#milestone-3-project-routes-and-archive-policy), when the routes exist.
 
 - `next build` with `DATABASE_URL` unset exits 0. `/` still prerenders. The root layout and the `/` page do not import `getAuth()` or `getDb()`.
 - `next start` with `DATABASE_URL` unset returns HTTP 200 and the scaffold text for `GET /`. That is the existing production smoke, re-run after the auth route exists. A session cookie on that request still returns the public scaffold. `/` does not redirect to `/dashboard`.
-- With the test database migrated: `GET /dashboard`, `GET /projects`, and `GET /projects/{id}` with no cookie redirect to `/sign-in` and do not render protected content.
-- The same three routes with an unapproved seeded session redirect to `/sign-in` with the fixed unapproved message.
-- `GET /dashboard` with an approved seeded session returns the minimal Milestone 2 page. That page does not query dashboard metrics.
-- The auth Route Handler and the protected pages read the request, so their responses are not a shared cached render of another user's data. The build must not open a database connection while prerendering `/`.
+- `GET /sign-in` renders the GitHub sign-in page. It does not require a session and does not render protected content.
+- `/api/auth/[...all]` is mounted. The offline OAuth tests in this milestone drive that handler, including the redirect to `/dashboard` after an approved sign-in.
+- With the test database migrated, `/dashboard` is checked three ways: no cookie redirects to `/sign-in`; an unapproved seeded session redirects to `/sign-in` with the fixed unapproved message; an approved seeded session returns the minimal page and does not query dashboard metrics. None of those responses render another user's data.
+- `/dashboard` and the auth Route Handler read the request, so their responses are not a shared cached render. The build must not open a database connection while prerendering `/`.
 
 In 1.7.12, `getSession` returns before the session query when the session cookie is absent. Constructing `getAuth()` can still touch Postgres if the adapter's schema check runs. Milestone 2 records what an unauthenticated `/dashboard` request does when `DATABASE_URL` is unset. That request must not change the `/` response.
 
