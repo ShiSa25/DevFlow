@@ -53,7 +53,7 @@ The process listens, and the home page reports status `ok` and database `not con
 
 ## Local Postgres
 
-`docker-compose.yml` starts PostgreSQL 18, the current stable major (PostgreSQL 19 is still a release candidate). The database name, user, and password are `devflow`. The published port is `5432`.
+`docker-compose.yml` starts PostgreSQL 18, the current stable major (PostgreSQL 19 is still a release candidate). The database name, user, and password are `devflow`. Compose publishes Postgres on `127.0.0.1:5432` only.
 
 ```bash
 docker compose up -d
