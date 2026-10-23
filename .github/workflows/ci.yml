@@ -25,5 +25,7 @@ jobs:
         run: bash scripts/production-smoke.sh
       - name: Authentication checks
         run: bash scripts/auth-checks.sh
+      - name: Project checks
+        run: bash scripts/project-checks.sh
       - name: Database smoke
         run: bash scripts/database-smoke.sh

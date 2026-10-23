@@ -1,8 +1,8 @@
 # Database design
 
-PostgreSQL, through the existing Drizzle schema in `src/db/schema.ts` and the existing `drizzle/` migration directory. `npm run db:generate` writes SQL. `npm run db:migrate` applies it. Process startup does not migrate, and importing `src/db` does not connect.
+PostgreSQL, through the Drizzle schema in `src/db/schema.ts` and the `drizzle/` migration directory. `npm run db:generate` writes SQL. `npm run db:migrate` applies it. Process startup does not migrate, and importing `src/db` does not connect.
 
-This pull request does not add tables. The Drizzle journal stays empty until the milestone that implements each table.
+`drizzle/0000_auth_tables.sql` creates the auth tables. `drizzle/0001_project_table.sql` creates `project`. The `task` table is not in the schema yet, so a project delete does not cascade to tasks.
 
 The Better Auth Drizzle adapter addresses tables by the schema property names `user`, `session`, `account`, and `verification`, and it addresses columns by the camelCase property names in [its field mapping](https://www.better-auth.com/docs/adapters/drizzle). SQL identifiers below are snake_case. The Drizzle property keeps the library's camelCase name (`accountId: text("account_id")`). Pass that schema object into `drizzleAdapter`. Leave `usePlural` off. Do not point the adapter at a second schema file.
 
@@ -79,11 +79,11 @@ No rate-limit table. The library's production rate limit can use its default in-
 
 Names are not unique. New rows are active (`archived_at` null).
 
-While `archived_at` is set, the server still returns the project and its tasks to the owner. The only writes the server allows in that state are clearing `archived_at` (restore) and deleting the project row. Deleting the project cascades to its tasks. Editing the project name or description, and creating, updating, or deleting an individual task, are refused by the server operation and leave both tables unchanged. A missing or other-owner row is the same not-found result as any other hidden record. The database does not encode that distinction with a second constraint. The operation rules are in [server operations](server-operations.md).
+While `archived_at` is set, the server still returns the project to the owner. The only writes the server allows in that state are clearing `archived_at` (restore) and deleting the project row. Editing the project name or description is refused and leaves the row unchanged. When the task table exists, deleting the project cascades to its tasks, and task writes on an archived project are refused the same way. Milestone 3 does not create that table, so there is no task cascade yet. A missing or other-owner row is the same not-found result as any other hidden record. The database does not encode that distinction with a second constraint. The operation rules are in [server operations](server-operations.md).
 
 `updated_at` changes when the project is created, when its name or description changes, and when it is archived or restored. No trigger and no task statement updates it. Task creates, edits, and deletes leave `project.updated_at` as it was.
 
-Index `project_owner_list_idx` on `(owner_id, updated_at desc, id desc)` supports the owner-scoped list and the five most recently updated active projects. Active versus archived is a predicate on `archived_at` in that same query (`is null` or `is not null`). One list, two filters. The tie-breaker is `id` descending.
+Index `project_owner_list_idx` on `(owner_id, updated_at desc, id desc)` supports the owner-scoped list and the five most recently updated active projects. The generated index adds `NULLS LAST` on the two descending columns. Both are not null, so that clause does not change the list order. Active versus archived is a predicate on `archived_at` in that same query (`is null` or `is not null`). One list, two filters. The tie-breaker is `id` descending.
 
 Deleting a user is not a pilot feature. The cascade is there so an `owner_id` cannot point at a missing user if a row is removed later.
 

@@ -8,7 +8,7 @@ const ADMIN_URLS = [
   "postgres://devflow:devflow@127.0.0.1:5432/devflow",
 ];
 
-const TEST_DATABASE_NAME = /^devflow_auth_test_[a-f0-9]+$/;
+const TEST_DATABASE_NAME = /^devflow_(auth|project)_test_[a-f0-9]+$/;
 
 export function assertIsolatedAuthTestDatabase(url: string): void {
   let parsed: URL;
@@ -54,8 +54,8 @@ function quoteIdent(name: string): string {
   return `"${name}"`;
 }
 
-export async function createIsolatedDatabase(): Promise<string> {
-  const name = `devflow_auth_test_${randomBytes(8).toString("hex")}`;
+export async function createIsolatedDatabase(kind: "auth" | "project" = "auth"): Promise<string> {
+  const name = `devflow_${kind}_test_${randomBytes(8).toString("hex")}`;
   const admin = await connectAdmin();
   try {
     await admin.query(`CREATE DATABASE ${quoteIdent(name)}`);

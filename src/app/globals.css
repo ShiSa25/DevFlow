@@ -26,7 +26,77 @@ button {
   font: inherit;
 }
 
-button:focus-visible {
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-top: 1rem;
+}
+
+input,
+textarea {
+  box-sizing: border-box;
+  display: block;
+  font: inherit;
+  width: 100%;
+}
+
+.account-nav,
+.filters,
+.pager,
+.form-actions,
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.account-nav,
+.filters,
+.pager,
+.form-actions {
+  margin-top: 1rem;
+}
+
+.account-nav form {
+  margin: 0;
+}
+
+[aria-current="page"] {
+  font-weight: 700;
+}
+
+.form-error {
+  margin: 0.25rem 0 0;
+}
+
+.project-list {
+  padding-left: 1.25rem;
+}
+
+.project-list time,
+.project-description {
+  display: block;
+}
+
+.project-description {
+  white-space: pre-wrap;
+}
+
+dialog {
+  border: 1px solid CanvasText;
+  max-width: min(32rem, calc(100vw - 2rem));
+  width: 100%;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
 }

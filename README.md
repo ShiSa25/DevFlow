@@ -1,8 +1,8 @@
 # DevFlow
 
-A developer productivity dashboard. This repository currently contains the application scaffold: Next.js App Router, TypeScript, and PostgreSQL. See [docs/architecture.md](docs/architecture.md) for the layout, the database pool, and the product work that is still ahead.
+A developer productivity dashboard. The app is a Next.js App Router project with TypeScript, PostgreSQL, GitHub sign-in for approved pilots, and owner-scoped projects. Tasks and dashboard metrics are not implemented yet. See [docs/architecture.md](docs/architecture.md) for the layout, the database pool, and the work that is still ahead.
 
-The private-pilot design, including the authentication library and session decision, is in [docs/design](docs/design/README.md). That design is not implemented. The commands below still run the scaffold.
+The private-pilot design is in [docs/design](docs/design/README.md).
 
 ## Requirements
 
@@ -72,13 +72,23 @@ npm run db:migrate
 npm run dev
 ```
 
-Open http://127.0.0.1:3000/sign-in and use Continue with GitHub. The button stays disabled while the browser is sent to GitHub, so the click is not sent twice. If that request fails, the button is enabled again and the page shows "GitHub sign-in did not complete. Try again." It does not show the server's error body. An approved sign-in lands on `/dashboard`, which only shows that the person is signed in. Sign out from that page. `/` stays the public scaffold page.
+Open http://127.0.0.1:3000/sign-in and use Continue with GitHub. The button stays disabled while the browser is sent to GitHub, so the click is not sent twice. If that request fails, the button is enabled again and the page shows "GitHub sign-in did not complete. Try again." It does not show the server's error body. An approved sign-in lands on `/dashboard`, which shows that the person is signed in and links to Projects. It does not show project or task metrics. Sign out from that page. `/` stays the public scaffold page.
 
 The auth handler exposes GitHub sign-in, the GitHub callback, session reads, and sign-out. Profile updates, email or password changes, account deletion, and the other Better Auth account routes are disabled. A session that was valid before someone was removed from `PILOT_GITHUB_USER_IDS` can still be read and signed out, and it cannot change the stored profile. Protected pages use a separate check and send that person back to sign-in.
 
 Do not set `BETTER_AUTH_TRUSTED_ORIGINS`. The app rejects that variable so extra origins cannot be added to the library's trusted list.
 
 The database module keeps one pool per process. Development stores that pool on `globalThis` so Next.js hot reload reuses it. Idle pool errors are logged with database URLs redacted. Importing the module does not connect.
+
+## Projects
+
+An approved pilot can create, list, view, edit, archive, restore, and permanently delete their own projects at `/projects` and `/projects/[projectId]`. There is no task list, no shared project, and no GitHub repository import.
+
+The list is one query. Active projects are the default. `view=archived` shows archived projects. The page size is 25, ordered by `updated_at` descending and then `id` descending. Changing the filter returns to page 1. A page past the end is empty. Archived projects stay readable. Restore and permanent delete remain available. Editing an archived project is rejected and does not write. Repeating archive or restore succeeds and does not change timestamps.
+
+Permanent delete uses a native dialog that says the deletion cannot be undone. The server action accepts the delete only when `confirm` is `delete`. The project table does not reference a task table, so this delete does not cascade to tasks.
+
+`npm run test:projects` follows the same isolation rules as `npm run test:auth`. It needs the local Compose Postgres and a completed `npm run build` for the route checks. It creates a database named `devflow_project_test_` plus random hex, migrates only that database, and drops it afterward. It does not migrate `devflow` or an inherited `DATABASE_URL`.
 
 ## Checks
 
@@ -88,7 +98,7 @@ npm run lint
 npm run test
 ```
 
-`npm run test:auth` is separate. It needs the local Compose Postgres and a completed `npm run build`. It creates a database named `devflow_auth_test_` plus random hex, migrates only that database, and drops it afterward. It does not migrate `devflow` or an inherited `DATABASE_URL`. The GitHub token and user endpoints are mocked. CI does not call GitHub.
+`npm run test:auth` and `npm run test:projects` are separate from `npm run test`. Both need the local Compose Postgres. `test:auth` also needs a completed `npm run build`, and so do the project route checks. `test:auth` creates a database named `devflow_auth_test_` plus random hex, migrates only that database, and drops it afterward. It does not migrate `devflow` or an inherited `DATABASE_URL`. The GitHub token and user endpoints are mocked. CI does not call GitHub.
 
 `typecheck` and `lint` generate Next.js route types first, then run `tsc --noEmit` or ESLint.
 
@@ -100,4 +110,4 @@ bash scripts/production-smoke.sh
 bash scripts/database-smoke.sh
 ```
 
-The production script expects a completed build, unsets `DATABASE_URL`, and requests the scaffold page on `127.0.0.1:3000`. The authentication script starts Compose Postgres, then runs `npm run test:auth` with any inherited `DATABASE_URL` removed. Those tests create and migrate an isolated database. The database script starts the Compose Postgres, waits up to 60 seconds for it to become healthy, sets `DATABASE_URL` to `postgres://devflow:devflow@localhost:5432/devflow`, migrates, and runs `SELECT 1`. It does not send those commands to an inherited database URL.
+The production script expects a completed build, unsets `DATABASE_URL`, and requests the scaffold page on `127.0.0.1:3000`. The authentication script starts Compose Postgres, then runs `npm run test:auth` with any inherited `DATABASE_URL` removed. The project script does the same for `npm run test:projects`. Those tests create and migrate an isolated database. The database script starts the Compose Postgres, waits up to 60 seconds for it to become healthy, sets `DATABASE_URL` to the Compose database, migrates, and runs `SELECT 1`. It does not send those commands to an inherited database URL.
