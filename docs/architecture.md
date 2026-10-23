@@ -46,7 +46,7 @@ Drizzle Kit is the schema tool. The runtime client is Drizzle ORM on node-postgr
 
 `npm run dev` and `npm run build && npm run start` bring the app up when `DATABASE_URL` is unset, when it points at a stopped database, or when Compose has not been started. The home page renders the scaffold text. A later request that calls `getDb()` and runs a query fails on that request until Postgres is reachable. Module import and process startup do not open a socket.
 
-`npm run db:migrate` and `npm run db:smoke` are the commands that use a running database.
+`npm run db:migrate` and `npm run db:smoke` are the commands that use a running database. `db:smoke` is the standalone check: it reads `.env` from the current directory and leaves an already exported `DATABASE_URL` unchanged. That loading stays in `scripts/db-smoke.ts`. The shared database client only reads the environment it is given.
 
 ## Local Postgres
 
@@ -58,7 +58,7 @@ cp .env.example .env
 npm run db:migrate
 ```
 
-`npm run db:smoke` runs `SELECT 1` through `getDb()` and then closes that pool.
+`npm run db:smoke` runs `SELECT 1` through `getDb()` and then closes that pool. With the documented setup (`cp .env.example .env`), that command uses the URL in `.env`. `scripts/database-smoke.sh` does not use that lookup. Before migrations and the query, it sets `DATABASE_URL` to the Compose database, `postgres://devflow:devflow@localhost:5432/devflow`, replacing any inherited value.
 
 ## CI
 
@@ -66,7 +66,7 @@ npm run db:migrate
 
 The production smoke check starts `npm run start` with `DATABASE_URL` unset and without Postgres. It requires HTTP 200 from `http://127.0.0.1:3000/` and the scaffold page text.
 
-The database smoke check runs `docker compose up -d --wait --wait-timeout 60` against this Compose file, applies migrations, and runs `npm run db:smoke`. If Postgres does not become healthy within 60 seconds, or either later command fails, the job exits with a smoke-check message and Compose logs. The script always runs `docker compose down --remove-orphans` afterward. That stops the container and does not delete the named volume.
+The database smoke check runs `docker compose up -d --wait --wait-timeout 60` against this Compose file. It then sets `DATABASE_URL` to the Compose database and only then applies migrations and runs `npm run db:smoke`. An inherited `DATABASE_URL` cannot move those commands to another database. If Postgres does not become healthy within 60 seconds, or either later command fails, the job exits with a smoke-check message and Compose logs. The script always runs `docker compose down --remove-orphans` afterward. That stops the container and does not delete the named volume.
 
 ## Intentionally deferred
 

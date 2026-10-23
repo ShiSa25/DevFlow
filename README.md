@@ -45,7 +45,7 @@ npm run db:migrate
 
 `db:generate` writes SQL from `src/db/schema.ts` and does not need a running database. `db:migrate` applies `drizzle/` and does need one. App startup does not migrate.
 
-`npm run db:smoke` runs `SELECT 1` through the application database client. Use it after Postgres is healthy and migrations have been applied.
+`npm run db:smoke` loads `.env` when `DATABASE_URL` is not already exported, runs `SELECT 1` through the application database client, and closes that pool. An exported `DATABASE_URL` stays in effect. Use it after Postgres is healthy and migrations have been applied. `scripts/database-smoke.sh` is separate: it always sets `DATABASE_URL` to the Compose database before migrating and querying, and it does not keep an inherited URL.
 
 The database module keeps one pool per process. Development stores that pool on `globalThis` so Next.js hot reload reuses it. Idle pool errors are logged with database URLs redacted. Importing the module does not connect.
 
@@ -67,4 +67,4 @@ bash scripts/production-smoke.sh
 bash scripts/database-smoke.sh
 ```
 
-The production script expects a completed build, unsets `DATABASE_URL`, and requests the scaffold page on `127.0.0.1:3000`. The database script starts the Compose Postgres, waits up to 60 seconds for it to become healthy, migrates, and runs `SELECT 1`.
+The production script expects a completed build, unsets `DATABASE_URL`, and requests the scaffold page on `127.0.0.1:3000`. The database script starts the Compose Postgres, waits up to 60 seconds for it to become healthy, sets `DATABASE_URL` to `postgres://devflow:devflow@localhost:5432/devflow`, migrates, and runs `SELECT 1`. It does not send those commands to an inherited database URL.

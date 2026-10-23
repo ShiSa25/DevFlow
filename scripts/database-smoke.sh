@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export DATABASE_URL="${DATABASE_URL:-postgres://devflow:devflow@localhost:5432/devflow}"
+# Always target the Compose database from .env.example. An inherited
+# DATABASE_URL must not redirect migrations or the smoke query.
+export DATABASE_URL="postgres://devflow:devflow@localhost:5432/devflow"
 
 cleanup() {
   status=$?
