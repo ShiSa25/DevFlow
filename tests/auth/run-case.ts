@@ -446,6 +446,61 @@ async function signOutCase(): Promise<unknown> {
   return { status: response.status };
 }
 
+async function removedProfileMutation(): Promise<unknown> {
+  const cookie = requiredEnv("SEEDED_GRACE_COOKIE");
+  const beforeRows = await getDb().select().from(user).where(eq(user.id, "user-grace"));
+  assert.equal(beforeRows.length, 1);
+  const before = beforeRows[0];
+  assert.ok(before);
+  assert.equal(before.name, "Grace Hopper");
+  const beforeUpdatedAt = before.updatedAt.toISOString();
+  const beforeEmail = before.email;
+
+  const update = await postJson("/api/auth/update-user", { name: "Hijacked Name" }, cookie);
+  const updateBody = await update.text();
+  assert.equal(update.status, 404, updateBody);
+  assert.equal(updateBody.includes("Hijacked Name"), false);
+
+  const changeEmail = await postJson(
+    "/api/auth/change-email",
+    { newEmail: "hijacked@example.com" },
+    cookie,
+  );
+  assert.equal(changeEmail.status, 404);
+  const remove = await postJson("/api/auth/delete-user", { callbackURL: "/sign-in" }, cookie);
+  assert.equal(remove.status, 404);
+  const reset = await GET(
+    new Request(`${ORIGIN}/api/auth/reset-password/synthetic-token?callbackURL=/sign-in`, {
+      headers: { cookie, origin: ORIGIN },
+    }),
+  );
+  assert.equal(reset.status, 404);
+
+  const afterRows = await getDb().select().from(user).where(eq(user.id, "user-grace"));
+  assert.equal(afterRows.length, 1);
+  assert.equal(afterRows[0]?.name, "Grace Hopper");
+  assert.equal(afterRows[0]?.email, beforeEmail);
+  assert.equal(afterRows[0]?.updatedAt.toISOString(), beforeUpdatedAt);
+  const accounts = await getDb().select().from(account).where(eq(account.userId, "user-grace"));
+  assert.equal(accounts.length, 1);
+  assert.equal(accounts[0]?.accountId, "9999");
+
+  const sessionResult = await getAuth().api.getSession({ headers: new Headers({ cookie }) });
+  assert.equal(sessionResult?.user.id, "user-grace");
+  assert.equal(sessionResult?.user.name, "Grace Hopper");
+  const admission = await requirePilot(new Headers({ cookie }));
+  assert.equal(admission.status, "unapproved");
+
+  return {
+    updateStatus: update.status,
+    changeEmailStatus: changeEmail.status,
+    deleteStatus: remove.status,
+    resetStatus: reset.status,
+    name: afterRows[0]?.name,
+    admission: admission.status,
+  };
+}
+
 async function trustedOrigins(): Promise<unknown> {
   assert.throws(() => getAuth(), /BETTER_AUTH_TRUSTED_ORIGINS/);
   assert.throws(() => getAuth(), /BETTER_AUTH_TRUSTED_ORIGINS/);
@@ -462,6 +517,7 @@ const cases: Record<string, () => Promise<unknown>> = {
   "seed-sessions": seedSessions,
   admission,
   "admission-cookie": admissionCookie,
+  "removed-profile-mutation": removedProfileMutation,
   "sign-out": signOutCase,
   "trusted-origins": trustedOrigins,
 };

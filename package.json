@@ -34,6 +34,7 @@
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
+    "happy-dom": "^21.0.4",
     "tsx": "^4.20.6",
     "typescript": "^5"
   }

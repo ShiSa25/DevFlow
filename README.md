@@ -72,7 +72,9 @@ npm run db:migrate
 npm run dev
 ```
 
-Open http://127.0.0.1:3000/sign-in and use Continue with GitHub. An approved sign-in lands on `/dashboard`, which only shows that the person is signed in. Sign out from that page. `/` stays the public scaffold page.
+Open http://127.0.0.1:3000/sign-in and use Continue with GitHub. The button stays disabled while the browser is sent to GitHub, so the click is not sent twice. If that request fails, the button is enabled again and the page shows "GitHub sign-in did not complete. Try again." It does not show the server's error body. An approved sign-in lands on `/dashboard`, which only shows that the person is signed in. Sign out from that page. `/` stays the public scaffold page.
+
+The auth handler exposes GitHub sign-in, the GitHub callback, session reads, and sign-out. Profile updates, email or password changes, account deletion, and the other Better Auth account routes are disabled. A session that was valid before someone was removed from `PILOT_GITHUB_USER_IDS` can still be read and signed out, and it cannot change the stored profile. Protected pages use a separate check and send that person back to sign-in.
 
 Do not set `BETTER_AUTH_TRUSTED_ORIGINS`. The app rejects that variable so extra origins cannot be added to the library's trusted list.
 

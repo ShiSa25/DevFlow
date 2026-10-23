@@ -75,7 +75,21 @@ The database smoke check runs `docker compose up -d --wait --wait-timeout 60` ag
 
 Better Auth 1.7.12 stores sessions in Postgres and uses GitHub as the only provider. `getAuth()` builds that instance on first use. Importing `src/auth`, `next build`, and `/` do not connect to Postgres.
 
-`PILOT_GITHUB_USER_IDS` is parsed when `src/config/pilot.ts` is first loaded. The running process keeps that result. Restart or redeploy after changing it. Empty and malformed lists deny access. `requirePilot()` loads the GitHub account id for the session user and compares that decimal string with the loaded set. Pages redirect. Other callers get `unauthenticated` or `unapproved`.
+`PILOT_GITHUB_USER_IDS` is parsed when `src/config/pilot.ts` is first loaded. The running process keeps that result. Restart or redeploy after changing it. Empty and malformed lists deny access. `requirePilot()` loads the GitHub account id for the session user and compares that decimal string with the loaded set. Pages redirect. Other callers get `unauthenticated` or `unapproved`. `requirePilot()` is not wrapped around the auth catch-all.
+
+The catch-all keeps the routes this pilot uses:
+
+| Method and path | Who can call it |
+| --- | --- |
+| `POST /api/auth/sign-in/social` | Anonymous. Starts GitHub sign-in. |
+| `GET /api/auth/callback/github` | Anonymous. Finishes the OAuth callback. |
+| `GET` or `POST /api/auth/get-session` | Anyone with or without a cookie. A removed pilot's session still resolves here. |
+| `POST /api/auth/sign-out` | The current session, including a removed pilot, so they can end it. |
+| `GET /api/auth/ok` and `GET /api/auth/error` | Anonymous library routes. |
+
+Account-management routes are turned off with Better Auth `disabledPaths`: profile updates, email and password changes, account deletion, email sign-up and sign-in, password reset, email verification, linking, token refresh, and session list or revoke. `POST /api/auth/update-user` from a still-valid session whose GitHub id is no longer approved is HTTP 404 and does not change the stored user. The password-reset token URL is not an exact `disabledPaths` entry, so a `before` hook rejects `/reset-password/<token>`. `set-password` is a server-only Better Auth method and is not an HTTP route. A user-row update that still reaches the database is allowed only for an approved pilot session. User deletes are refused.
+
+Continue with GitHub stays disabled while the provider redirect is starting, so the click is not sent twice. If Better Auth returns an HTTP error object, or the call throws, the button is enabled again and the page shows the fixed sentence "GitHub sign-in did not complete. Try again." The server body is not shown.
 
 `/dashboard` reads the session inside a Suspense boundary so `next build` can prerender `/` without a database. With Cache Components, an unauthenticated or unapproved dashboard response carries Next's redirect to `/sign-in` in the HTML (a refresh target and `NEXT_REDIRECT`) rather than only a `Location` header. The approved response streams the signed-in sentence for that request. It is not a shared cached render.
 
@@ -96,3 +110,11 @@ These product and platform pieces are not in the app yet:
 - Hosted deployment manifests
 
 Add a table to `src/db/schema.ts`, generate a migration, and call `getDb()` from the server route that needs the data when the next product feature needs storage.
+
+## Dependency follow-up
+
+`npm audit` reports four moderate findings, all one chain:
+
+`drizzle-kit@0.31.11` → `@esbuild-kit/esm-loader@2.6.5` → `@esbuild-kit/core-utils@3.3.2` → `esbuild@0.18.20`
+
+Advisory [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99) applies to esbuild `<=0.24.2`. The nested copy is `0.18.20`. The direct `esbuild` package in this install is `0.25.12`, which is outside that range. Drizzle Kit is a devDependency used by `db:generate`. The vulnerable esbuild is the old copy pulled in for Kit's TypeScript loader, which is deprecated and merged into `tsx`. It is not part of the Next.js server, the production bundle, or request handling. The advisory is about esbuild's development server accepting browser requests. This app does not start that server. Do not run `npm audit fix --force` for it, and do not downgrade Drizzle Kit to hide it. Revisit when a Drizzle Kit release stops depending on `@esbuild-kit/esm-loader`.

@@ -234,6 +234,14 @@ describe("milestone 2 authentication", { concurrency: 1 }, () => {
       SEEDED_ADA_COOKIE: adaCookie,
     });
     assert.equal(malformed.status, "unapproved");
+
+    const profile = runCase("removed-profile-mutation", {
+      PILOT_GITHUB_USER_IDS: "1001",
+      SEEDED_GRACE_COOKIE: graceCookie,
+    });
+    assert.equal(profile.updateStatus, 404);
+    assert.equal(profile.name, "Grace Hopper");
+    assert.equal(profile.admission, "unapproved");
   });
 
   it("serves the public pages and the minimal dashboard over HTTP", async () => {

@@ -1,10 +1,12 @@
 import { betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { and, eq } from "drizzle-orm";
 import { isPilotGithubUser } from "../config/pilot";
 import { getDb } from "../db/client";
 import { account as accountTable, session as sessionTable, user, verification } from "../db/schema";
+import { DISABLED_ACCOUNT_PATHS } from "./disabled-paths";
 import { githubUserIdFromProfile, syntheticGithubEmail } from "./github-identity";
 import { PILOT_NOT_APPROVED_CODE, PILOT_NOT_APPROVED_MESSAGE } from "./messages";
 
@@ -69,6 +71,18 @@ async function githubAccountIdForUser(userId: string): Promise<string | undefine
   return rows[0]?.accountId;
 }
 
+function sessionUserId(context: unknown): string | undefined {
+  if (typeof context !== "object" || context === null) {
+    return undefined;
+  }
+  const record = context as {
+    context?: { session?: { user?: { id?: unknown } } };
+    session?: { user?: { id?: unknown } };
+  };
+  const id = record.context?.session?.user?.id ?? record.session?.user?.id;
+  return typeof id === "string" && id ? id : undefined;
+}
+
 function buildAuth() {
   if (process.env["BETTER_AUTH_TRUSTED_ORIGINS"] !== undefined) {
     throw new Error(
@@ -128,6 +142,14 @@ function buildAuth() {
         },
       },
     },
+    disabledPaths: [...DISABLED_ACCOUNT_PATHS],
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path.startsWith("/reset-password/")) {
+          throw new APIError("NOT_FOUND", { message: "Not Found" });
+        }
+      }),
+    },
     user: {
       validateUserInfo: ({ source }) => {
         const githubUserId =
@@ -143,6 +165,24 @@ function buildAuth() {
       },
     },
     databaseHooks: {
+      user: {
+        update: {
+          before: async (record, context) => {
+            const userId = sessionUserId(context);
+            if (!userId) {
+              return false;
+            }
+            const githubUserId = await githubAccountIdForUser(userId);
+            if (!githubUserId || !isPilotGithubUser(githubUserId)) {
+              return false;
+            }
+            return { data: record };
+          },
+        },
+        delete: {
+          before: async () => false,
+        },
+      },
       account: {
         create: {
           before: async (record) => discardAccountTokens(record),
