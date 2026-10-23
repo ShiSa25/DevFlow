@@ -2,6 +2,8 @@
 
 A developer productivity dashboard. This repository currently contains the application scaffold: Next.js App Router, TypeScript, and PostgreSQL. See [docs/architecture.md](docs/architecture.md) for the layout, the database pool, and the product work that is still ahead.
 
+The private-pilot design, including the authentication library and session decision, is in [docs/design](docs/design/README.md). That design is not implemented. The commands below still run the scaffold.
+
 ## Requirements
 
 - Node.js 22 LTS
